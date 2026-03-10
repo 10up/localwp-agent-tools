@@ -1,0 +1,44 @@
+{
+	"name": "agent-tools",
+	"productName": "Agent Tools",
+	"version": "1.0.0",
+	"description": "MCP server, skills, and project context for AI-powered WordPress development. Works with Claude Code, Cursor, Windsurf, and any MCP client.",
+	"renderer": "lib/renderer.js",
+	"main": "lib/main.js",
+	"icon": "icon.png",
+	"bgColor": "#6E5BFF",
+	"author": "Fueled",
+	"license": "MIT",
+	"slug": "agent-tools",
+	"scripts": {
+		"build": "npm run build:addon && npm run build:mcp",
+		"build:addon": "tsc -p tsconfig.json",
+		"build:mcp": "cd bundled/mcp-server && npm run build",
+		"watch": "tsc -p tsconfig.json --watch",
+		"prepare": "npm run build"
+	},
+	"devDependencies": {
+		"@getflywheel/local": "^8",
+		"@types/fs-extra": "^11.0.4",
+		"@types/node": "^20.0.0",
+		"@types/react": "^18.2.0",
+		"typescript": "^5.3.0"
+	},
+	"dependencies": {
+		"@getflywheel/local-components": "^17.6.2",
+		"fs-extra": "^11.2.0",
+		"lodash": "^4.17.21",
+		"react": "^18.2.0",
+		"react-dom": "^18.2.0"
+	},
+	"bundledDependencies": [
+		"@getflywheel/local-components",
+		"fs-extra",
+		"lodash",
+		"react",
+		"react-dom"
+	],
+	"engines": {
+		"local-by-flywheel": "^9.0.0"
+	}
+}

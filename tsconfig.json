@@ -1,0 +1,23 @@
+{
+	"compilerOptions": {
+		"allowJs": true,
+		"checkJs": false,
+		"declaration": false,
+		"esModuleInterop": true,
+		"experimentalDecorators": true,
+		"jsx": "react",
+		"lib": ["es2017", "esnext.asynciterable", "dom"],
+		"module": "commonjs",
+		"noImplicitReturns": true,
+		"noImplicitAny": false,
+		"outDir": "./lib",
+		"resolveJsonModule": true,
+		"rootDir": "./src",
+		"sourceMap": true,
+		"skipLibCheck": true,
+		"strict": false,
+		"target": "es2015"
+	},
+	"exclude": ["node_modules", "bundled"],
+	"include": ["src"]
+}

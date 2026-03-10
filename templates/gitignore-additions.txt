@@ -1,0 +1,5 @@
+# Agent Tools
+.agent-tools/
+.claude/
+CLAUDE.md
+.mcp.json
