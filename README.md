@@ -1,6 +1,6 @@
 # LocalWP Agent Tools
 
-A Local add-on that provides an MCP server, skills, and project context for AI-powered WordPress development. Works with Claude Code, Cursor, Windsurf, VS Code Copilot, and any MCP client.
+A Local add-on that provides an MCP server and project context for AI-powered WordPress development. Works with Claude Code, Cursor, Windsurf, VS Code Copilot, and any MCP client.
 
 ## What It Does
 
@@ -9,8 +9,7 @@ When you click "Enable" on a site in Local, the add-on:
 1. **Registers the site with the MCP server** — a single HTTP server running in Local's main process that gives AI tools access to WP-CLI, error logs, configuration, and site management
 2. **Writes MCP config** (`.mcp.json`, `.cursor/mcp.json`, etc.) — auto-configured with the correct HTTP endpoint for each agent
 3. **Generates project context** (`CLAUDE.md`, `.cursorrules`, etc.) — site context including PHP/MySQL versions, active plugins, theme, and file structure
-4. **Copies WordPress skills** to `.claude/skills/` — debugging and database exploration workflows (Claude Code only)
-5. **Updates `.gitignore`** — so generated files aren't committed
+4. **Updates `.gitignore`** — so generated files aren't committed
 
 Then open the site folder in your AI tool of choice and you're ready to go.
 
@@ -52,11 +51,6 @@ Sites remain registered even when stopped, so the MCP endpoint is always reachab
 | | `site_restart` | Restart a site's services |
 | | `site_status` | Get current status of a site |
 | | `list_sites` | List all Local sites with status |
-
-## Skills (Claude Code only)
-
-- **wp-debugger** — Systematic troubleshooting for errors, white screens, plugin conflicts, slow pages
-- **wp-db-explorer** — Natural language to SQL queries against the WordPress database
 
 ## Installation
 
@@ -119,10 +113,6 @@ agent-tools/
 │       ├── config.ts           # read_wp_config, edit_wp_config
 │       ├── site.ts             # get_site_info, site_health_check
 │       └── environment.ts      # site_start, site_stop, site_restart, site_status, list_sites
-├── bundled/
-│   └── skills/                 # Claude Code skills
-│       ├── wp-debugger/
-│       └── wp-db-explorer/
 ├── templates/                  # Config templates
 │   ├── claude-md.hbs           # CLAUDE.md Handlebars template
 │   └── gitignore-additions.txt

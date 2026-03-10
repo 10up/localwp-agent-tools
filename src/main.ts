@@ -37,8 +37,6 @@ interface AgentTargetConfig {
 	mcpConfigTopLevelKey: string;
 	/** Path to project context/instructions file, relative to project dir */
 	contextFilePath: string;
-	/** Whether this agent supports skills */
-	supportsSkills: boolean;
 	/** Extra entries to add to .gitignore */
 	gitignoreEntries: string[];
 }
@@ -49,7 +47,6 @@ const AGENT_TARGETS: Record<AgentTarget, AgentTargetConfig> = {
 		mcpConfigPath: '.mcp.json',
 		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: 'CLAUDE.md',
-		supportsSkills: true,
 		gitignoreEntries: ['.mcp.json', 'CLAUDE.md'],
 	},
 	cursor: {
@@ -57,7 +54,6 @@ const AGENT_TARGETS: Record<AgentTarget, AgentTargetConfig> = {
 		mcpConfigPath: path.join('.cursor', 'mcp.json'),
 		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: '.cursorrules',
-		supportsSkills: false,
 		gitignoreEntries: ['.cursorrules'],
 	},
 	windsurf: {
@@ -65,7 +61,6 @@ const AGENT_TARGETS: Record<AgentTarget, AgentTargetConfig> = {
 		mcpConfigPath: path.join('.windsurf', 'mcp.json'),
 		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: '.windsurfrules',
-		supportsSkills: false,
 		gitignoreEntries: ['.windsurfrules'],
 	},
 	vscode: {
@@ -73,7 +68,6 @@ const AGENT_TARGETS: Record<AgentTarget, AgentTargetConfig> = {
 		mcpConfigPath: path.join('.vscode', 'mcp.json'),
 		mcpConfigTopLevelKey: 'servers',
 		contextFilePath: path.join('.github', 'copilot-instructions.md'),
-		supportsSkills: false,
 		gitignoreEntries: [],
 	},
 };
@@ -92,12 +86,6 @@ const GITIGNORE_MARKER_END = '# <<< Agent Tools';
 
 const CONTEXT_MARKER_START = '<!-- >>> Agent Tools (auto-generated, do not edit) -->';
 const CONTEXT_MARKER_END = '<!-- <<< Agent Tools -->';
-
-// Skills that the add-on manages — used for selective cleanup
-const MANAGED_SKILLS = [
-	'wp-debugger',
-	'wp-db-explorer',
-];
 
 // ---------------------------------------------------------------------------
 // Globals
@@ -130,10 +118,6 @@ function getStoredAgents(site: Local.Site): AgentTarget[] {
 	// Migration: old sites that were enabled before multi-agent support default to claude
 	if ((site as any).customOptions?.agentToolsEnabled) return ['claude'];
 	return [];
-}
-
-function getBundledPath(): string {
-	return path.join(__dirname, '..', 'bundled');
 }
 
 function execCommand(command: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): Promise<string> {
@@ -555,21 +539,6 @@ async function setupSite(site: Local.Site, notifier: any, projectDir: string, ag
 		// Write project context
 		const contextPath = path.join(projectPath, agentConfig.contextFilePath);
 		await writeContextFile(contextPath, contextContent, agent);
-
-		// Copy skills if supported
-		if (agentConfig.supportsSkills) {
-			const skillsSrc = path.join(getBundledPath(), 'skills');
-			const skillsDest = path.join(projectPath, '.claude', 'skills');
-			await fs.ensureDir(skillsDest);
-
-			for (const skillName of MANAGED_SKILLS) {
-				const skillSrcDir = path.join(skillsSrc, skillName);
-				const skillDestDir = path.join(skillsDest, skillName);
-				if (await fs.pathExists(skillSrcDir)) {
-					await fs.copy(skillSrcDir, skillDestDir, { overwrite: true });
-				}
-			}
-		}
 	}
 
 	// 4. Update .gitignore
@@ -612,27 +581,9 @@ async function teardownSite(site: Local.Site, notifier: any): Promise<void> {
 
 		await removeMcpConfigEntry(path.join(projectPath, agentConfig.mcpConfigPath), agentConfig.mcpConfigTopLevelKey);
 		await removeContextFile(path.join(projectPath, agentConfig.contextFilePath), agent);
-
-		if (agentConfig.supportsSkills) {
-			for (const skillName of MANAGED_SKILLS) {
-				await fs.remove(path.join(projectPath, '.claude', 'skills', skillName));
-			}
-
-			const skillsDir = path.join(projectPath, '.claude', 'skills');
-			try {
-				const remaining = await fs.readdir(skillsDir);
-				if (remaining.length === 0) await fs.remove(skillsDir);
-			} catch { /* directory may not exist */ }
-
-			const claudeDir = path.join(projectPath, '.claude');
-			try {
-				const remaining = await fs.readdir(claudeDir);
-				if (remaining.length === 0) await fs.remove(claudeDir);
-			} catch { /* directory may not exist */ }
-		}
 	}
 
-	// 4. Clean up .gitignore
+	// 3. Clean up .gitignore
 	await updateGitignore(projectPath, []);
 
 	// 5. Unmark site
@@ -665,22 +616,6 @@ async function changeProjectDir(site: Local.Site, newProjectDir: string, notifie
 
 		await removeMcpConfigEntry(path.join(oldPath, agentConfig.mcpConfigPath), agentConfig.mcpConfigTopLevelKey);
 		await removeContextFile(path.join(oldPath, agentConfig.contextFilePath), agent);
-
-		if (agentConfig.supportsSkills) {
-			for (const skillName of MANAGED_SKILLS) {
-				await fs.remove(path.join(oldPath, '.claude', 'skills', skillName));
-			}
-			const oldSkillsDir = path.join(oldPath, '.claude', 'skills');
-			try {
-				const remaining = await fs.readdir(oldSkillsDir);
-				if (remaining.length === 0) await fs.remove(oldSkillsDir);
-			} catch {}
-			const oldClaudeDir = path.join(oldPath, '.claude');
-			try {
-				const remaining = await fs.readdir(oldClaudeDir);
-				if (remaining.length === 0) await fs.remove(oldClaudeDir);
-			} catch {}
-		}
 	}
 	await updateGitignore(oldPath, []);
 
@@ -693,19 +628,6 @@ async function changeProjectDir(site: Local.Site, newProjectDir: string, notifie
 		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
 		await mergeMcpConfig(path.join(newPath, agentConfig.mcpConfigPath), serverEntry, agentConfig.mcpConfigTopLevelKey);
 		await writeContextFile(path.join(newPath, agentConfig.contextFilePath), contextContent, agent);
-
-		if (agentConfig.supportsSkills) {
-			const skillsSrc = path.join(getBundledPath(), 'skills');
-			const skillsDest = path.join(newPath, '.claude', 'skills');
-			await fs.ensureDir(skillsDest);
-			for (const skillName of MANAGED_SKILLS) {
-				const skillSrcDir = path.join(skillsSrc, skillName);
-				const skillDestDir = path.join(skillsDest, skillName);
-				if (await fs.pathExists(skillSrcDir)) {
-					await fs.copy(skillSrcDir, skillDestDir, { overwrite: true });
-				}
-			}
-		}
 	}
 
 	await updateGitignore(newPath, agents);
@@ -741,22 +663,6 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 
 		await removeMcpConfigEntry(path.join(projectPath, agentConfig.mcpConfigPath), agentConfig.mcpConfigTopLevelKey);
 		await removeContextFile(path.join(projectPath, agentConfig.contextFilePath), agent);
-
-		if (agentConfig.supportsSkills) {
-			for (const skillName of MANAGED_SKILLS) {
-				await fs.remove(path.join(projectPath, '.claude', 'skills', skillName));
-			}
-			const skillsDir = path.join(projectPath, '.claude', 'skills');
-			try {
-				const remaining = await fs.readdir(skillsDir);
-				if (remaining.length === 0) await fs.remove(skillsDir);
-			} catch {}
-			const claudeDir = path.join(projectPath, '.claude');
-			try {
-				const remaining = await fs.readdir(claudeDir);
-				if (remaining.length === 0) await fs.remove(claudeDir);
-			} catch {}
-		}
 	}
 
 	// Add configs for newly selected agents
@@ -769,19 +675,6 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 			const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
 			await mergeMcpConfig(path.join(projectPath, agentConfig.mcpConfigPath), serverEntry, agentConfig.mcpConfigTopLevelKey);
 			await writeContextFile(path.join(projectPath, agentConfig.contextFilePath), contextContent, agent);
-
-			if (agentConfig.supportsSkills) {
-				const skillsSrc = path.join(getBundledPath(), 'skills');
-				const skillsDest = path.join(projectPath, '.claude', 'skills');
-				await fs.ensureDir(skillsDest);
-				for (const skillName of MANAGED_SKILLS) {
-					const skillSrcDir = path.join(skillsSrc, skillName);
-					const skillDestDir = path.join(skillsDest, skillName);
-					if (await fs.pathExists(skillSrcDir)) {
-						await fs.copy(skillSrcDir, skillDestDir, { overwrite: true });
-					}
-				}
-			}
 		}
 	}
 
