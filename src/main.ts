@@ -1,7 +1,5 @@
 import * as path from 'path';
-import * as os from 'os';
 import * as fs from 'fs-extra';
-import * as net from 'net';
 import * as Local from '@getflywheel/local';
 import * as LocalMain from '@getflywheel/local/main';
 import { execFile } from 'child_process';
@@ -12,18 +10,16 @@ import {
 	findMysqlSocket,
 	findWpCli,
 } from './helpers/paths';
+import { SiteConfig, SiteConfigRegistry } from './helpers/site-config';
+import { findAvailablePort, savePort, removePortFile } from './helpers/port';
+import { createMcpHttpServer, startMcpHttpServer, stopMcpHttpServer, closeSessionsForSite } from './mcp-server';
+import { LocalApi } from './tools';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface McpServerEntry {
-	command: string;
-	args: string[];
-	env: Record<string, string>;
-}
-
-/** The key we use inside any mcpServers object to identify our entry */
+/** The key we use inside any mcpServers/servers object to identify our entry */
 const MCP_SERVER_KEY = 'local-wp';
 
 /**
@@ -37,6 +33,8 @@ interface AgentTargetConfig {
 	label: string;
 	/** Path to MCP config file, relative to project dir */
 	mcpConfigPath: string;
+	/** Top-level key in the MCP config JSON (mcpServers or servers) */
+	mcpConfigTopLevelKey: string;
 	/** Path to project context/instructions file, relative to project dir */
 	contextFilePath: string;
 	/** Whether this agent supports skills */
@@ -49,13 +47,15 @@ const AGENT_TARGETS: Record<AgentTarget, AgentTargetConfig> = {
 	claude: {
 		label: 'Claude Code',
 		mcpConfigPath: '.mcp.json',
+		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: 'CLAUDE.md',
 		supportsSkills: true,
-		gitignoreEntries: ['.agent-tools/', '.mcp.json', 'CLAUDE.md'],
+		gitignoreEntries: ['.mcp.json', 'CLAUDE.md'],
 	},
 	cursor: {
 		label: 'Cursor',
 		mcpConfigPath: path.join('.cursor', 'mcp.json'),
+		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: '.cursorrules',
 		supportsSkills: false,
 		gitignoreEntries: ['.cursorrules'],
@@ -63,6 +63,7 @@ const AGENT_TARGETS: Record<AgentTarget, AgentTargetConfig> = {
 	windsurf: {
 		label: 'Windsurf',
 		mcpConfigPath: path.join('.windsurf', 'mcp.json'),
+		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: '.windsurfrules',
 		supportsSkills: false,
 		gitignoreEntries: ['.windsurfrules'],
@@ -70,6 +71,7 @@ const AGENT_TARGETS: Record<AgentTarget, AgentTargetConfig> = {
 	vscode: {
 		label: 'VS Code Copilot',
 		mcpConfigPath: path.join('.vscode', 'mcp.json'),
+		mcpConfigTopLevelKey: 'servers',
 		contextFilePath: path.join('.github', 'copilot-instructions.md'),
 		supportsSkills: false,
 		gitignoreEntries: [],
@@ -79,7 +81,6 @@ const AGENT_TARGETS: Record<AgentTarget, AgentTargetConfig> = {
 interface AgentToolsStatus {
 	enabled: boolean;
 	configExists: boolean;
-	mcpServerInstalled: boolean;
 	sitePath: string;
 	projectDir: string;
 	agents: AgentTarget[];
@@ -99,27 +100,11 @@ const MANAGED_SKILLS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Bridge Server Constants & Types
+// Globals
 // ---------------------------------------------------------------------------
 
-const BRIDGE_SOCKET_DIR = process.platform === 'win32'
-	? ''
-	: path.join(os.homedir(), '.local-agent-tools');
-
-const BRIDGE_SOCKET_PATH = process.platform === 'win32'
-	? '\\\\.\\pipe\\local-agent-tools-bridge'
-	: path.join(BRIDGE_SOCKET_DIR, 'bridge.sock');
-
-interface BridgeRequest {
-	action: 'start' | 'stop' | 'restart' | 'status' | 'list';
-	siteId?: string;
-}
-
-interface BridgeResponse {
-	success: boolean;
-	data?: any;
-	error?: string;
-}
+const siteConfigRegistry = new SiteConfigRegistry();
+let mcpServerPort = 0;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -176,13 +161,10 @@ function escapeRegex(str: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// MCP Config — Safe Merge
+// SiteConfig Builder
 // ---------------------------------------------------------------------------
 
-/**
- * Builds our MCP server entry (the value, not the whole config file).
- */
-async function buildMcpServerEntry(site: Local.Site): Promise<McpServerEntry> {
+async function buildSiteConfig(site: Local.Site): Promise<SiteConfig> {
 	const sitePath = getSitePath(site);
 	const siteId = site.id;
 
@@ -200,38 +182,53 @@ async function buildMcpServerEntry(site: Local.Site): Promise<McpServerEntry> {
 	const domain = site.domain || '';
 	const siteUrl = `https://${domain}`;
 
-	const env: Record<string, string> = {
-		SITE_PATH: sitePath,
-		SITE_ID: siteId,
-		WP_PATH: path.join(sitePath, 'app', 'public'),
-		DB_NAME: site.mysql?.database || 'local',
-		DB_USER: site.mysql?.user || 'root',
-		DB_PASSWORD: site.mysql?.password || 'root',
-		SITE_DOMAIN: domain,
-		SITE_URL: siteUrl,
-		LOG_PATH: path.join(sitePath, 'logs'),
-		BRIDGE_SOCKET: BRIDGE_SOCKET_PATH,
-	};
-
-	if (mysqlSocket) env.DB_SOCKET = mysqlSocket;
+	let dbHost = '';
 	if (mysqlPort) {
-		env.DB_PORT = String(mysqlPort);
-		env.DB_HOST = '127.0.0.1';
+		dbHost = '127.0.0.1';
 	} else if (process.platform === 'win32') {
-		env.DB_HOST = '127.0.0.1';
+		dbHost = '127.0.0.1';
 	}
-	if (phpBin) env.PHP_BIN = phpBin;
-	if (mysqlBin) env.MYSQL_BIN = mysqlBin;
-	if (wpCliBin) env.WP_CLI_BIN = wpCliBin;
 
 	return {
-		command: process.execPath,
-		args: [path.join(sitePath, '.agent-tools', 'mcp-server', 'build', 'index.js')],
-		env: {
-			ELECTRON_RUN_AS_NODE: '1',
-			...env,
-		},
+		siteId,
+		sitePath,
+		wpPath: path.join(sitePath, 'app', 'public'),
+		phpBin: phpBin || 'php',
+		wpCliBin: wpCliBin || '',
+		mysqlBin: mysqlBin || '',
+		dbName: site.mysql?.database || 'local',
+		dbUser: site.mysql?.user || 'root',
+		dbPassword: site.mysql?.password || 'root',
+		dbSocket: mysqlSocket || null,
+		dbPort: mysqlPort ? Number(mysqlPort) : 3306,
+		dbHost,
+		siteDomain: domain,
+		siteUrl,
+		logPath: path.join(sitePath, 'logs'),
 	};
+}
+
+// ---------------------------------------------------------------------------
+// MCP Config — Per-Agent HTTP Format
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the MCP server entry for a specific agent.
+ * Each agent has different JSON shapes for HTTP MCP servers.
+ */
+function buildMcpServerEntry(agent: AgentTarget, port: number, siteId: string): Record<string, any> {
+	const url = `http://localhost:${port}/sites/${siteId}/mcp`;
+
+	switch (agent) {
+		case 'claude':
+			return { type: 'http', url };
+		case 'cursor':
+			return { url };
+		case 'windsurf':
+			return { serverUrl: url };
+		case 'vscode':
+			return { type: 'http', url };
+	}
 }
 
 /**
@@ -239,7 +236,7 @@ async function buildMcpServerEntry(site: Local.Site): Promise<McpServerEntry> {
  * Creates the file (and parent directories) if it doesn't exist.
  * Preserves all other entries in the file.
  */
-async function mergeMcpConfig(configPath: string, serverEntry: McpServerEntry): Promise<void> {
+async function mergeMcpConfig(configPath: string, serverEntry: Record<string, any>, topLevelKey: string): Promise<void> {
 	let existing: any = {};
 
 	if (await fs.pathExists(configPath)) {
@@ -254,11 +251,11 @@ async function mergeMcpConfig(configPath: string, serverEntry: McpServerEntry): 
 		}
 	}
 
-	if (!existing.mcpServers || typeof existing.mcpServers !== 'object') {
-		existing.mcpServers = {};
+	if (!existing[topLevelKey] || typeof existing[topLevelKey] !== 'object') {
+		existing[topLevelKey] = {};
 	}
 
-	existing.mcpServers[MCP_SERVER_KEY] = serverEntry;
+	existing[topLevelKey][MCP_SERVER_KEY] = serverEntry;
 
 	await fs.ensureDir(path.dirname(configPath));
 	await fs.writeJSON(configPath, existing, { spaces: 2 });
@@ -266,23 +263,20 @@ async function mergeMcpConfig(configPath: string, serverEntry: McpServerEntry): 
 
 /**
  * Removes our MCP server entry from a config file.
- * If the file becomes empty (no other servers), deletes it.
- * If the file has other servers, leaves them intact.
+ * Handles both mcpServers and servers top-level keys.
  */
-async function removeMcpConfigEntry(configPath: string): Promise<void> {
+async function removeMcpConfigEntry(configPath: string, topLevelKey: string): Promise<void> {
 	if (!await fs.pathExists(configPath)) return;
 
 	try {
 		const existing = await fs.readJSON(configPath);
-		if (existing?.mcpServers?.[MCP_SERVER_KEY]) {
-			delete existing.mcpServers[MCP_SERVER_KEY];
+		if (existing?.[topLevelKey]?.[MCP_SERVER_KEY]) {
+			delete existing[topLevelKey][MCP_SERVER_KEY];
 
-			if (Object.keys(existing.mcpServers).length === 0) {
-				// Check if there's anything else in the file besides mcpServers
-				const otherKeys = Object.keys(existing).filter(k => k !== 'mcpServers');
+			if (Object.keys(existing[topLevelKey]).length === 0) {
+				const otherKeys = Object.keys(existing).filter(k => k !== topLevelKey);
 				if (otherKeys.length === 0) {
 					await fs.remove(configPath);
-					// Clean up empty parent dirs (e.g. .cursor/, .windsurf/, .vscode/)
 					await removeEmptyParentDirs(configPath);
 					return;
 				}
@@ -297,7 +291,7 @@ async function removeMcpConfigEntry(configPath: string): Promise<void> {
 
 /**
  * Removes empty parent directories up to (but not including) the project root.
- * Only removes directories that we might have created (.cursor, .windsurf, .vscode, .github).
+ * Only removes directories that we might have created.
  */
 async function removeEmptyParentDirs(filePath: string): Promise<void> {
 	const managedDirs = ['.cursor', '.windsurf', '.vscode', '.github'];
@@ -317,9 +311,6 @@ async function removeEmptyParentDirs(filePath: string): Promise<void> {
 // Project Context — Safe Merge with Markers
 // ---------------------------------------------------------------------------
 
-/**
- * Generates the project context content (the WordPress site info).
- */
 async function generateProjectContext(site: Local.Site): Promise<string> {
 	const sitePath = getSitePath(site);
 	const phpVersion = site.services?.php?.version || 'unknown';
@@ -424,20 +415,13 @@ You can use the following tools to interact with the site:
 `;
 }
 
-/**
- * Writes project context to a file. For CLAUDE.md (which we fully own),
- * we write the whole file. For shared context files (.cursorrules, etc.),
- * we use markers to manage only our section.
- */
 async function writeContextFile(filePath: string, content: string, agent: AgentTarget): Promise<void> {
 	if (agent === 'claude') {
-		// CLAUDE.md — we own this file entirely
 		await fs.ensureDir(path.dirname(filePath));
 		await fs.writeFile(filePath, content, 'utf-8');
 		return;
 	}
 
-	// For other agents, use marked sections to avoid overwriting user content
 	const markedContent = `${CONTEXT_MARKER_START}\n${content}\n${CONTEXT_MARKER_END}`;
 
 	await fs.ensureDir(path.dirname(filePath));
@@ -445,7 +429,6 @@ async function writeContextFile(filePath: string, content: string, agent: AgentT
 	if (await fs.pathExists(filePath)) {
 		let existing = await fs.readFile(filePath, 'utf-8');
 
-		// Check if we already have a marked section — update it
 		const markerRegex = new RegExp(
 			`${escapeRegex(CONTEXT_MARKER_START)}[\\s\\S]*?${escapeRegex(CONTEXT_MARKER_END)}`,
 			'g'
@@ -455,7 +438,6 @@ async function writeContextFile(filePath: string, content: string, agent: AgentT
 			existing = existing.replace(markerRegex, markedContent);
 			await fs.writeFile(filePath, existing, 'utf-8');
 		} else {
-			// Append our section
 			const separator = existing.endsWith('\n') ? '\n' : '\n\n';
 			await fs.writeFile(filePath, existing + separator + markedContent + '\n', 'utf-8');
 		}
@@ -464,12 +446,6 @@ async function writeContextFile(filePath: string, content: string, agent: AgentT
 	}
 }
 
-/**
- * Removes our marked section from a context file.
- * For CLAUDE.md, removes the whole file (we own it).
- * For other files, removes only our marked section.
- * If the file becomes empty after removal, deletes it.
- */
 async function removeContextFile(filePath: string, agent: AgentTarget): Promise<void> {
 	if (!await fs.pathExists(filePath)) return;
 
@@ -503,9 +479,6 @@ async function removeContextFile(filePath: string, agent: AgentTarget): Promise<
 function buildGitignoreEntries(agents: AgentTarget[]): string[] {
 	const entries = new Set<string>();
 
-	// Always include .agent-tools/ if any agent is enabled (MCP server lives there)
-	entries.add('.agent-tools/');
-
 	for (const agent of agents) {
 		const config = AGENT_TARGETS[agent];
 		for (const entry of config.gitignoreEntries) {
@@ -533,15 +506,17 @@ async function updateGitignore(dirPath: string, agents: AgentTarget[]): Promise<
 
 	if (agents.length > 0) {
 		const entries = buildGitignoreEntries(agents);
-		const block = [
-			'',
-			GITIGNORE_MARKER_START,
-			...entries,
-			GITIGNORE_MARKER_END,
-			'',
-		].join('\n');
+		if (entries.length > 0) {
+			const block = [
+				'',
+				GITIGNORE_MARKER_START,
+				...entries,
+				GITIGNORE_MARKER_END,
+				'',
+			].join('\n');
 
-		content = content.trimEnd() + '\n' + block;
+			content = content.trimEnd() + '\n' + block;
+		}
 	}
 
 	await fs.writeFile(gitignorePath, content, 'utf-8');
@@ -551,9 +526,6 @@ async function updateGitignore(dirPath: string, agents: AgentTarget[]): Promise<
 // Core Functions
 // ---------------------------------------------------------------------------
 
-/**
- * Sets up Agent Tools for a site with the specified agent targets.
- */
 async function setupSite(site: Local.Site, notifier: any, projectDir: string, agents: AgentTarget[]): Promise<void> {
 	const sitePath = getSitePath(site);
 	const projectPath = getProjectPath(sitePath, projectDir);
@@ -564,35 +536,28 @@ async function setupSite(site: Local.Site, notifier: any, projectDir: string, ag
 		open: undefined,
 	});
 
-	// 1. Copy MCP server to site root (always at site root, shared by all agents)
-	const mcpServerSrc = path.join(getBundledPath(), 'mcp-server');
-	const mcpServerDest = path.join(sitePath, '.agent-tools', 'mcp-server');
+	// 1. Build SiteConfig and register it
+	const siteConfig = await buildSiteConfig(site);
+	siteConfigRegistry.register(siteConfig);
 
-	await fs.remove(mcpServerDest);
-	await fs.ensureDir(mcpServerDest);
-
-	await fs.copy(mcpServerSrc, mcpServerDest);
-
-	// 2. Build the MCP server entry once (same for all agents)
-	const serverEntry = await buildMcpServerEntry(site);
-
-	// 3. Generate project context once (same content for all agents)
+	// 2. Generate project context
 	const contextContent = await generateProjectContext(site);
 
-	// 4. For each selected agent, write configs
+	// 3. For each selected agent, write configs
 	for (const agent of agents) {
-		const config = AGENT_TARGETS[agent];
+		const agentConfig = AGENT_TARGETS[agent];
 
-		// Write MCP config (merge into existing)
-		const mcpConfigPath = path.join(projectPath, config.mcpConfigPath);
-		await mergeMcpConfig(mcpConfigPath, serverEntry);
+		// Write MCP config (HTTP format, per-agent shape)
+		const mcpConfigPath = path.join(projectPath, agentConfig.mcpConfigPath);
+		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
+		await mergeMcpConfig(mcpConfigPath, serverEntry, agentConfig.mcpConfigTopLevelKey);
 
 		// Write project context
-		const contextPath = path.join(projectPath, config.contextFilePath);
+		const contextPath = path.join(projectPath, agentConfig.contextFilePath);
 		await writeContextFile(contextPath, contextContent, agent);
 
 		// Copy skills if supported
-		if (config.supportsSkills) {
+		if (agentConfig.supportsSkills) {
 			const skillsSrc = path.join(getBundledPath(), 'skills');
 			const skillsDest = path.join(projectPath, '.claude', 'skills');
 			await fs.ensureDir(skillsDest);
@@ -607,10 +572,10 @@ async function setupSite(site: Local.Site, notifier: any, projectDir: string, ag
 		}
 	}
 
-	// 5. Update .gitignore
+	// 4. Update .gitignore
 	await updateGitignore(projectPath, agents);
 
-	// 6. Store state
+	// 5. Store state
 	LocalMain.SiteData.updateSite(site.id, {
 		customOptions: {
 			...(site as any).customOptions,
@@ -634,26 +599,25 @@ async function teardownSite(site: Local.Site, notifier: any): Promise<void> {
 	const projectPath = getProjectPath(sitePath, projectDir);
 	const agents = getStoredAgents(site);
 
-	// 1. Remove .agent-tools/ directory from site root
+	// 1. Unregister from config registry and close MCP sessions
+	siteConfigRegistry.unregister(site.id);
+	closeSessionsForSite(site.id);
+
+	// 2. Remove legacy .agent-tools/ directory if present (from old stdio architecture)
 	await fs.remove(path.join(sitePath, '.agent-tools'));
 
-	// 2. For each agent, remove our config entries
+	// 3. For each agent, remove our config entries
 	for (const agent of agents) {
-		const config = AGENT_TARGETS[agent];
+		const agentConfig = AGENT_TARGETS[agent];
 
-		// Remove MCP config entry (not the whole file)
-		await removeMcpConfigEntry(path.join(projectPath, config.mcpConfigPath));
+		await removeMcpConfigEntry(path.join(projectPath, agentConfig.mcpConfigPath), agentConfig.mcpConfigTopLevelKey);
+		await removeContextFile(path.join(projectPath, agentConfig.contextFilePath), agent);
 
-		// Remove context file / our section
-		await removeContextFile(path.join(projectPath, config.contextFilePath), agent);
-
-		// Remove managed skills if applicable
-		if (config.supportsSkills) {
+		if (agentConfig.supportsSkills) {
 			for (const skillName of MANAGED_SKILLS) {
 				await fs.remove(path.join(projectPath, '.claude', 'skills', skillName));
 			}
 
-			// Clean up empty directories (only if we emptied them)
 			const skillsDir = path.join(projectPath, '.claude', 'skills');
 			try {
 				const remaining = await fs.readdir(skillsDir);
@@ -668,10 +632,10 @@ async function teardownSite(site: Local.Site, notifier: any): Promise<void> {
 		}
 	}
 
-	// 3. Clean up .gitignore
+	// 4. Clean up .gitignore
 	await updateGitignore(projectPath, []);
 
-	// 4. Unmark site
+	// 5. Unmark site
 	const customOptions = { ...(site as any).customOptions };
 	delete customOptions.agentToolsEnabled;
 	delete customOptions.agentToolsProjectDir;
@@ -697,12 +661,12 @@ async function changeProjectDir(site: Local.Site, newProjectDir: string, notifie
 
 	// Remove configs from old location
 	for (const agent of agents) {
-		const config = AGENT_TARGETS[agent];
+		const agentConfig = AGENT_TARGETS[agent];
 
-		await removeMcpConfigEntry(path.join(oldPath, config.mcpConfigPath));
-		await removeContextFile(path.join(oldPath, config.contextFilePath), agent);
+		await removeMcpConfigEntry(path.join(oldPath, agentConfig.mcpConfigPath), agentConfig.mcpConfigTopLevelKey);
+		await removeContextFile(path.join(oldPath, agentConfig.contextFilePath), agent);
 
-		if (config.supportsSkills) {
+		if (agentConfig.supportsSkills) {
 			for (const skillName of MANAGED_SKILLS) {
 				await fs.remove(path.join(oldPath, '.claude', 'skills', skillName));
 			}
@@ -721,16 +685,16 @@ async function changeProjectDir(site: Local.Site, newProjectDir: string, notifie
 	await updateGitignore(oldPath, []);
 
 	// Write configs to new location
-	const serverEntry = await buildMcpServerEntry(site);
 	const contextContent = await generateProjectContext(site);
 
 	for (const agent of agents) {
-		const config = AGENT_TARGETS[agent];
+		const agentConfig = AGENT_TARGETS[agent];
 
-		await mergeMcpConfig(path.join(newPath, config.mcpConfigPath), serverEntry);
-		await writeContextFile(path.join(newPath, config.contextFilePath), contextContent, agent);
+		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
+		await mergeMcpConfig(path.join(newPath, agentConfig.mcpConfigPath), serverEntry, agentConfig.mcpConfigTopLevelKey);
+		await writeContextFile(path.join(newPath, agentConfig.contextFilePath), contextContent, agent);
 
-		if (config.supportsSkills) {
+		if (agentConfig.supportsSkills) {
 			const skillsSrc = path.join(getBundledPath(), 'skills');
 			const skillsDest = path.join(newPath, '.claude', 'skills');
 			await fs.ensureDir(skillsDest);
@@ -746,7 +710,6 @@ async function changeProjectDir(site: Local.Site, newProjectDir: string, notifie
 
 	await updateGitignore(newPath, agents);
 
-	// Update stored preference
 	LocalMain.SiteData.updateSite(site.id, {
 		customOptions: {
 			...(site as any).customOptions,
@@ -761,10 +724,6 @@ async function changeProjectDir(site: Local.Site, newProjectDir: string, notifie
 	});
 }
 
-/**
- * Updates which agents are configured for an already-enabled site.
- * Adds configs for newly selected agents, removes configs for deselected ones.
- */
 async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier: any): Promise<void> {
 	if (!isAgentToolsEnabled(site)) return;
 
@@ -778,12 +737,12 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 
 	// Remove configs for deselected agents
 	for (const agent of removed) {
-		const config = AGENT_TARGETS[agent];
+		const agentConfig = AGENT_TARGETS[agent];
 
-		await removeMcpConfigEntry(path.join(projectPath, config.mcpConfigPath));
-		await removeContextFile(path.join(projectPath, config.contextFilePath), agent);
+		await removeMcpConfigEntry(path.join(projectPath, agentConfig.mcpConfigPath), agentConfig.mcpConfigTopLevelKey);
+		await removeContextFile(path.join(projectPath, agentConfig.contextFilePath), agent);
 
-		if (config.supportsSkills) {
+		if (agentConfig.supportsSkills) {
 			for (const skillName of MANAGED_SKILLS) {
 				await fs.remove(path.join(projectPath, '.claude', 'skills', skillName));
 			}
@@ -802,16 +761,16 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 
 	// Add configs for newly selected agents
 	if (added.length > 0) {
-		const serverEntry = await buildMcpServerEntry(site);
 		const contextContent = await generateProjectContext(site);
 
 		for (const agent of added) {
-			const config = AGENT_TARGETS[agent];
+			const agentConfig = AGENT_TARGETS[agent];
 
-			await mergeMcpConfig(path.join(projectPath, config.mcpConfigPath), serverEntry);
-			await writeContextFile(path.join(projectPath, config.contextFilePath), contextContent, agent);
+			const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
+			await mergeMcpConfig(path.join(projectPath, agentConfig.mcpConfigPath), serverEntry, agentConfig.mcpConfigTopLevelKey);
+			await writeContextFile(path.join(projectPath, agentConfig.contextFilePath), contextContent, agent);
 
-			if (config.supportsSkills) {
+			if (agentConfig.supportsSkills) {
 				const skillsSrc = path.join(getBundledPath(), 'skills');
 				const skillsDest = path.join(projectPath, '.claude', 'skills');
 				await fs.ensureDir(skillsDest);
@@ -829,7 +788,6 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 	// Update .gitignore with new agent set
 	await updateGitignore(projectPath, newAgents);
 
-	// Store updated agents
 	LocalMain.SiteData.updateSite(site.id, {
 		customOptions: {
 			...(site as any).customOptions,
@@ -853,14 +811,18 @@ async function regenerateConfig(site: Local.Site): Promise<void> {
 	const projectPath = getProjectPath(sitePath, projectDir);
 	const agents = getStoredAgents(site);
 
-	const serverEntry = await buildMcpServerEntry(site);
+	// Rebuild SiteConfig and re-register
+	const siteConfig = await buildSiteConfig(site);
+	siteConfigRegistry.register(siteConfig);
+
 	const contextContent = await generateProjectContext(site);
 
 	for (const agent of agents) {
-		const config = AGENT_TARGETS[agent];
+		const agentConfig = AGENT_TARGETS[agent];
 
-		await mergeMcpConfig(path.join(projectPath, config.mcpConfigPath), serverEntry);
-		await writeContextFile(path.join(projectPath, config.contextFilePath), contextContent, agent);
+		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
+		await mergeMcpConfig(path.join(projectPath, agentConfig.mcpConfigPath), serverEntry, agentConfig.mcpConfigTopLevelKey);
+		await writeContextFile(path.join(projectPath, agentConfig.contextFilePath), contextContent, agent);
 	}
 }
 
@@ -869,14 +831,13 @@ async function getStatus(site: Local.Site): Promise<AgentToolsStatus> {
 	const enabled = isAgentToolsEnabled(site);
 	const projectDir = getStoredProjectDir(site);
 	const agents = getStoredAgents(site);
-	const mcpServerInstalled = await fs.pathExists(path.join(sitePath, '.agent-tools', 'mcp-server', 'node_modules'));
 
 	// Check if any MCP config exists
 	const projectPath = getProjectPath(sitePath, projectDir);
 	let configExists = false;
 	for (const agent of agents) {
-		const config = AGENT_TARGETS[agent];
-		if (await fs.pathExists(path.join(projectPath, config.mcpConfigPath))) {
+		const agentConfig = AGENT_TARGETS[agent];
+		if (await fs.pathExists(path.join(projectPath, agentConfig.mcpConfigPath))) {
 			configExists = true;
 			break;
 		}
@@ -885,7 +846,6 @@ async function getStatus(site: Local.Site): Promise<AgentToolsStatus> {
 	return {
 		enabled,
 		configExists,
-		mcpServerInstalled,
 		sitePath,
 		projectDir,
 		agents,
@@ -893,188 +853,90 @@ async function getStatus(site: Local.Site): Promise<AgentToolsStatus> {
 }
 
 // ---------------------------------------------------------------------------
-// Bridge Server
+// LocalApi Implementation — wraps Local's SiteProcessManager
 // ---------------------------------------------------------------------------
 
-async function handleBridgeRequest(request: BridgeRequest): Promise<BridgeResponse> {
-	try {
-		const serviceContainer = LocalMain.getServiceContainer();
-		const siteProcessManager = serviceContainer.cradle.siteProcessManager;
+function createLocalApi(): LocalApi {
+	return {
+		async startSite(siteId: string) {
+			const serviceContainer = LocalMain.getServiceContainer();
+			const siteProcessManager = serviceContainer.cradle.siteProcessManager;
+			const site = LocalMain.SiteData.getSite(siteId);
+			if (!site) throw new Error(`Site not found: ${siteId}`);
 
-		switch (request.action) {
-			case 'list': {
-				const sites = LocalMain.SiteData.getSites();
-				const statuses = siteProcessManager.getSiteStatuses();
-				const siteList = Object.values(sites).map((site: Local.Site) => ({
-					id: site.id,
-					name: site.name,
-					domain: site.domain,
-					path: getSitePath(site),
-					status: statuses[site.id] || 'unknown',
-				}));
-				return { success: true, data: siteList };
+			const currentStatus = siteProcessManager.getSiteStatus(site);
+			if (currentStatus === 'running') {
+				return { id: site.id, status: 'running', message: 'Site is already running' };
 			}
+			await siteProcessManager.start(site);
+			return {
+				id: site.id,
+				name: site.name,
+				status: siteProcessManager.getSiteStatus(site),
+			};
+		},
 
-			case 'status': {
-				if (!request.siteId) {
-					return { success: false, error: 'siteId is required for status action' };
-				}
-				const site = LocalMain.SiteData.getSite(request.siteId);
-				if (!site) {
-					return { success: false, error: `Site not found: ${request.siteId}` };
-				}
-				const status = siteProcessManager.getSiteStatus(site);
-				return {
-					success: true,
-					data: {
-						id: site.id,
-						name: site.name,
-						domain: site.domain,
-						status,
-					},
-				};
+		async stopSite(siteId: string) {
+			const serviceContainer = LocalMain.getServiceContainer();
+			const siteProcessManager = serviceContainer.cradle.siteProcessManager;
+			const site = LocalMain.SiteData.getSite(siteId);
+			if (!site) throw new Error(`Site not found: ${siteId}`);
+
+			const currentStatus = siteProcessManager.getSiteStatus(site);
+			if (currentStatus === 'halted') {
+				return { id: site.id, status: 'halted', message: 'Site is already stopped' };
 			}
+			await siteProcessManager.stop(site);
+			return {
+				id: site.id,
+				name: site.name,
+				status: siteProcessManager.getSiteStatus(site),
+			};
+		},
 
-			case 'start': {
-				if (!request.siteId) {
-					return { success: false, error: 'siteId is required for start action' };
-				}
-				const site = LocalMain.SiteData.getSite(request.siteId);
-				if (!site) {
-					return { success: false, error: `Site not found: ${request.siteId}` };
-				}
-				const currentStatus = siteProcessManager.getSiteStatus(site);
-				if (currentStatus === 'running') {
-					return { success: true, data: { id: site.id, status: 'running', message: 'Site is already running' } };
-				}
-				await siteProcessManager.start(site);
-				return {
-					success: true,
-					data: {
-						id: site.id,
-						name: site.name,
-						status: siteProcessManager.getSiteStatus(site),
-					},
-				};
-			}
+		async restartSite(siteId: string) {
+			const serviceContainer = LocalMain.getServiceContainer();
+			const siteProcessManager = serviceContainer.cradle.siteProcessManager;
+			const site = LocalMain.SiteData.getSite(siteId);
+			if (!site) throw new Error(`Site not found: ${siteId}`);
 
-			case 'stop': {
-				if (!request.siteId) {
-					return { success: false, error: 'siteId is required for stop action' };
-				}
-				const site = LocalMain.SiteData.getSite(request.siteId);
-				if (!site) {
-					return { success: false, error: `Site not found: ${request.siteId}` };
-				}
-				const currentStatus = siteProcessManager.getSiteStatus(site);
-				if (currentStatus === 'halted') {
-					return { success: true, data: { id: site.id, status: 'halted', message: 'Site is already stopped' } };
-				}
-				await siteProcessManager.stop(site);
-				return {
-					success: true,
-					data: {
-						id: site.id,
-						name: site.name,
-						status: siteProcessManager.getSiteStatus(site),
-					},
-				};
-			}
+			await siteProcessManager.restart(site);
+			return {
+				id: site.id,
+				name: site.name,
+				status: siteProcessManager.getSiteStatus(site),
+			};
+		},
 
-			case 'restart': {
-				if (!request.siteId) {
-					return { success: false, error: 'siteId is required for restart action' };
-				}
-				const site = LocalMain.SiteData.getSite(request.siteId);
-				if (!site) {
-					return { success: false, error: `Site not found: ${request.siteId}` };
-				}
-				await siteProcessManager.restart(site);
-				return {
-					success: true,
-					data: {
-						id: site.id,
-						name: site.name,
-						status: siteProcessManager.getSiteStatus(site),
-					},
-				};
-			}
+		async getSiteStatus(siteId: string) {
+			const serviceContainer = LocalMain.getServiceContainer();
+			const siteProcessManager = serviceContainer.cradle.siteProcessManager;
+			const site = LocalMain.SiteData.getSite(siteId);
+			if (!site) throw new Error(`Site not found: ${siteId}`);
 
-			default:
-				return { success: false, error: `Unknown action: ${(request as any).action}` };
-		}
-	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
-		console.error('[Agent Tools] Bridge request error:', message);
-		return { success: false, error: message };
-	}
-}
+			return {
+				id: site.id,
+				name: site.name,
+				domain: site.domain,
+				status: siteProcessManager.getSiteStatus(site),
+			};
+		},
 
-function startBridgeServer(): net.Server {
-	if (process.platform !== 'win32') {
-		// Ensure the socket directory exists with owner-only permissions
-		fs.ensureDirSync(BRIDGE_SOCKET_DIR, { mode: 0o700 });
-		try {
-			fs.removeSync(BRIDGE_SOCKET_PATH);
-		} catch {
-			// Ignore — file may not exist
-		}
-	}
+		async listSites() {
+			const serviceContainer = LocalMain.getServiceContainer();
+			const siteProcessManager = serviceContainer.cradle.siteProcessManager;
+			const sites = LocalMain.SiteData.getSites();
+			const statuses = siteProcessManager.getSiteStatuses();
 
-	const server = net.createServer((socket: net.Socket) => {
-		let buffer = '';
-
-		socket.on('data', (chunk: Buffer) => {
-			buffer += chunk.toString();
-
-			let newlineIdx: number;
-			while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
-				const raw = buffer.slice(0, newlineIdx).trim();
-				buffer = buffer.slice(newlineIdx + 1);
-
-				if (!raw) continue;
-
-				let request: BridgeRequest;
-				try {
-					request = JSON.parse(raw);
-				} catch {
-					const errResp: BridgeResponse = { success: false, error: 'Invalid JSON' };
-					socket.write(JSON.stringify(errResp) + '\n');
-					continue;
-				}
-
-				handleBridgeRequest(request)
-					.then((response) => {
-						if (!socket.destroyed) {
-							socket.write(JSON.stringify(response) + '\n');
-						}
-					})
-					.catch((err) => {
-						if (!socket.destroyed) {
-							const errResp: BridgeResponse = {
-								success: false,
-								error: err instanceof Error ? err.message : String(err),
-							};
-							socket.write(JSON.stringify(errResp) + '\n');
-						}
-					});
-			}
-		});
-
-		socket.on('error', (err: Error) => {
-			console.error('[Agent Tools] Bridge socket connection error:', err.message);
-		});
-	});
-
-	server.on('error', (err: Error) => {
-		console.error('[Agent Tools] Bridge server error:', err.message);
-	});
-
-	server.listen(BRIDGE_SOCKET_PATH, () => {
-		console.log(`[Agent Tools] Bridge server listening on ${BRIDGE_SOCKET_PATH}`);
-	});
-
-	return server;
+			return Object.values(sites).map((site: Local.Site) => ({
+				id: site.id,
+				name: site.name,
+				domain: site.domain || '',
+				path: getSitePath(site),
+				status: statuses[site.id] || 'unknown',
+			}));
+		},
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -1084,18 +946,54 @@ function startBridgeServer(): net.Server {
 export default function (context: LocalMain.AddonMainContext): void {
 	const { notifier, electron } = context;
 
-	const bridgeServer = startBridgeServer();
+	let httpServer: ReturnType<typeof createMcpHttpServer> | null = null;
+	const localApi = createLocalApi();
+
+	// Start the MCP HTTP server
+	(async () => {
+		try {
+			mcpServerPort = await findAvailablePort();
+			httpServer = createMcpHttpServer({ registry: siteConfigRegistry, localApi });
+			await startMcpHttpServer(httpServer, mcpServerPort);
+			await savePort(mcpServerPort);
+
+			// Register configs for all sites with Agent Tools enabled (regardless of running status).
+			// This ensures the MCP endpoint is always reachable — tools that need the site
+			// running (WP-CLI, DB) will return appropriate errors; file-based tools still work.
+			try {
+				const sites = LocalMain.SiteData.getSites();
+
+				for (const site of Object.values(sites) as Local.Site[]) {
+					if (isAgentToolsEnabled(site)) {
+						try {
+							const siteConfig = await buildSiteConfig(site);
+							siteConfigRegistry.register(siteConfig);
+							console.log(`[Agent Tools] Registered site: ${site.name}`);
+						} catch (err) {
+							console.error(`[Agent Tools] Failed to register site ${site.name}:`, err);
+						}
+					}
+				}
+			} catch (err) {
+				console.error('[Agent Tools] Failed to scan sites:', err);
+			}
+		} catch (err) {
+			console.error('[Agent Tools] Failed to start MCP HTTP server:', err);
+		}
+	})();
 
 	electron.app.on('will-quit', () => {
 		try {
-			bridgeServer.close();
-			if (process.platform !== 'win32') {
-				fs.removeSync(BRIDGE_SOCKET_PATH);
+			if (httpServer) {
+				stopMcpHttpServer(httpServer);
 			}
+			removePortFile();
 		} catch {
 			// Best-effort cleanup
 		}
 	});
+
+	// ── IPC Handlers ────────────────────────────────────────────────────
 
 	electron.ipcMain.handle('agent-tools:enable-site', async (_event: any, siteId: string, projectDir: string, agents: AgentTarget[]) => {
 		try {
@@ -1150,7 +1048,7 @@ export default function (context: LocalMain.AddonMainContext): void {
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			console.error('[Agent Tools] Get status failed:', message);
-			return { enabled: false, configExists: false, mcpServerInstalled: false, sitePath: '', projectDir: '', agents: [] };
+			return { enabled: false, configExists: false, sitePath: '', projectDir: '', agents: [] };
 		}
 	});
 
@@ -1178,14 +1076,30 @@ export default function (context: LocalMain.AddonMainContext): void {
 		}
 	});
 
+	// ── Hooks ───────────────────────────────────────────────────────────
+
 	LocalMain.HooksMain.addAction('siteStarted', async (site: Local.Site) => {
 		if (isAgentToolsEnabled(site)) {
 			try {
+				// Build and register SiteConfig
+				const siteConfig = await buildSiteConfig(site);
+				siteConfigRegistry.register(siteConfig);
+
+				// Regenerate MCP config (may have new port, updated paths)
 				await regenerateConfig(site);
 				console.log(`[Agent Tools] Config regenerated for "${site.name}" on site start.`);
 			} catch (err) {
 				console.error('[Agent Tools] Failed to regenerate config on site start:', err);
 			}
+		}
+	});
+
+	LocalMain.HooksMain.addAction('siteStopped', async (site: Local.Site) => {
+		if (isAgentToolsEnabled(site)) {
+			// Close active MCP sessions (they may be mid-operation with the DB),
+			// but keep the site registered so the MCP endpoint stays reachable.
+			closeSessionsForSite(site.id);
+			console.log(`[Agent Tools] Closed sessions for stopped site: ${site.name}`);
 		}
 	});
 }

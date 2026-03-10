@@ -21,7 +21,6 @@ const AGENT_HINTS: Record<AgentTarget, string> = {
 interface AgentToolsStatus {
 	enabled: boolean;
 	configExists: boolean;
-	mcpServerInstalled: boolean;
 	sitePath: string;
 	projectDir: string;
 	agents: AgentTarget[];

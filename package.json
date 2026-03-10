@@ -11,9 +11,7 @@
 	"license": "MIT",
 	"slug": "agent-tools",
 	"scripts": {
-		"build": "npm run build:addon && npm run build:mcp",
-		"build:addon": "tsc -p tsconfig.json",
-		"build:mcp": "cd bundled/mcp-server && npm run build",
+		"build": "tsc -p tsconfig.json",
 		"watch": "tsc -p tsconfig.json --watch",
 		"prepare": "npm run build"
 	},
@@ -26,17 +24,21 @@
 	},
 	"dependencies": {
 		"@getflywheel/local-components": "^17.6.2",
+		"@modelcontextprotocol/sdk": "^1.12.0",
 		"fs-extra": "^11.2.0",
 		"lodash": "^4.17.21",
 		"react": "^18.2.0",
-		"react-dom": "^18.2.0"
+		"react-dom": "^18.2.0",
+		"zod": "^3.24.0"
 	},
 	"bundledDependencies": [
 		"@getflywheel/local-components",
+		"@modelcontextprotocol/sdk",
 		"fs-extra",
 		"lodash",
 		"react",
-		"react-dom"
+		"react-dom",
+		"zod"
 	],
 	"engines": {
 		"local-by-flywheel": "^9.0.0"
