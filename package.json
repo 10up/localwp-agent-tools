@@ -16,7 +16,7 @@
 		"prepare": "npm run build"
 	},
 	"devDependencies": {
-		"@getflywheel/local": "^8",
+		"@getflywheel/local": "^9",
 		"@types/fs-extra": "^11.0.4",
 		"@types/node": "^20.0.0",
 		"@types/react": "^18.2.0",
