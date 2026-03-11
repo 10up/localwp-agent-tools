@@ -114,36 +114,53 @@ function getBinaryPlatformDirCandidates(): string[] {
  * @returns The full path to the service directory, or null if not found
  */
 async function findServiceDir(serviceName: string, version: string): Promise<string | null> {
-	const lightningDir = getLightningServicesPath();
+	// Check both the app bundle AND user data lightning-services directories.
+	// The bundled dir may not have newer PHP versions installed via Local's UI.
+	const dirsToCheck = new Set<string>();
 
-	try {
-		const entries = await fs.readdir(lightningDir);
-
-		// Look for an exact prefix match: "{serviceName}-{version}+"
-		// e.g. "php-8.2.27+1" matches serviceName="php", version="8.2.27"
-		const prefix = `${serviceName}-${version}`;
-		const match = entries.find(entry =>
-			entry === prefix || entry.startsWith(prefix + '+')
-		);
-
-		if (match) {
-			return path.join(lightningDir, match);
+	const appResourceCandidates = getLocalAppResourcesCandidates();
+	for (const candidate of appResourceCandidates) {
+		const bundledPath = path.join(candidate, 'lightning-services');
+		if (fs.existsSync(bundledPath)) {
+			dirsToCheck.add(bundledPath);
 		}
+	}
 
-		// Fallback: look for any directory starting with "{serviceName}-{majorVersion}"
-		// e.g. for version "8.2.23", also match "8.2.27+1" if exact match not found
-		const majorMinor = version.split('.').slice(0, 2).join('.');
-		const fuzzyPrefix = `${serviceName}-${majorMinor}`;
-		const fuzzyMatch = entries
-			.filter(entry => entry.startsWith(fuzzyPrefix))
-			.sort()
-			.pop(); // Take the latest version
+	const userDataPath = path.join(getLocalDataPath(), 'lightning-services');
+	if (fs.existsSync(userDataPath)) {
+		dirsToCheck.add(userDataPath);
+	}
 
-		if (fuzzyMatch) {
-			return path.join(lightningDir, fuzzyMatch);
+	for (const lightningDir of dirsToCheck) {
+		try {
+			const entries = await fs.readdir(lightningDir);
+
+			// Look for an exact prefix match: "{serviceName}-{version}+"
+			// e.g. "php-8.2.27+1" matches serviceName="php", version="8.2.27"
+			const prefix = `${serviceName}-${version}`;
+			const match = entries.find(entry =>
+				entry === prefix || entry.startsWith(prefix + '+')
+			);
+
+			if (match) {
+				return path.join(lightningDir, match);
+			}
+
+			// Fallback: look for any directory starting with "{serviceName}-{majorVersion}"
+			// e.g. for version "8.2.23", also match "8.2.27+1" if exact match not found
+			const majorMinor = version.split('.').slice(0, 2).join('.');
+			const fuzzyPrefix = `${serviceName}-${majorMinor}`;
+			const fuzzyMatch = entries
+				.filter(entry => entry.startsWith(fuzzyPrefix))
+				.sort()
+				.pop(); // Take the latest version
+
+			if (fuzzyMatch) {
+				return path.join(lightningDir, fuzzyMatch);
+			}
+		} catch (err) {
+			// Directory doesn't exist or can't be read
 		}
-	} catch (err) {
-		// Directory doesn't exist or can't be read
 	}
 
 	return null;
