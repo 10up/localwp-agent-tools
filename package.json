@@ -3,6 +3,9 @@
 	"productName": "Agent Tools",
 	"version": "1.0.0",
 	"description": "MCP server, skills, and project context for AI-powered WordPress development. Works with Claude Code, Cursor, Windsurf, and any MCP client.",
+	"keywords": [
+		"local-addon"
+	],
 	"renderer": "lib/renderer.js",
 	"main": "lib/main.js",
 	"icon": "icon.png",
@@ -31,14 +34,21 @@
 		"react-dom": "^18.2.0",
 		"zod": "^3.24.0"
 	},
+	"peerDependencies": {
+		"react": "^18.2.0",
+		"react-dom": "^18.2.0"
+	},
 	"bundledDependencies": [
 		"@getflywheel/local-components",
 		"@modelcontextprotocol/sdk",
 		"fs-extra",
 		"lodash",
-		"react",
-		"react-dom",
 		"zod"
+	],
+	"files": [
+		"lib/**/*",
+		"icon.png",
+		"README.md"
 	],
 	"engines": {
 		"local-by-flywheel": "^9.0.0"
