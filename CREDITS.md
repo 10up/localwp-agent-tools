@@ -16,4 +16,4 @@ Thank you to all the people who have already contributed to this repository via 
 
 The following software libraries are utilized in this repository.
 
-[Model Context Protocol SDK](https://github.com/modelcontextprotocol/typescript-sdk)
+[Model Context Protocol SDK](https://github.com/modelcontextprotocol/typescript-sdk), [Local](https://localwp.com/)
