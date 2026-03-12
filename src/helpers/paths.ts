@@ -131,30 +131,37 @@ async function findServiceDir(serviceName: string, version: string): Promise<str
 		dirsToCheck.add(userDataPath);
 	}
 
+	// First pass: exact match across all directories.
+	// This ensures an exact match in the user data dir isn't shadowed by a
+	// fuzzy match in the bundled dir.
+	const prefix = `${serviceName}-${version}`;
+
 	for (const lightningDir of dirsToCheck) {
 		try {
 			const entries = await fs.readdir(lightningDir);
-
-			// Look for an exact prefix match: "{serviceName}-{version}+"
-			// e.g. "php-8.2.27+1" matches serviceName="php", version="8.2.27"
-			const prefix = `${serviceName}-${version}`;
 			const match = entries.find(entry =>
 				entry === prefix || entry.startsWith(prefix + '+')
 			);
-
 			if (match) {
 				return path.join(lightningDir, match);
 			}
+		} catch (err) {
+			// Directory doesn't exist or can't be read
+		}
+	}
 
-			// Fallback: look for any directory starting with "{serviceName}-{majorVersion}"
-			// e.g. for version "8.2.23", also match "8.2.27+1" if exact match not found
-			const majorMinor = version.split('.').slice(0, 2).join('.');
-			const fuzzyPrefix = `${serviceName}-${majorMinor}`;
+	// Second pass: fuzzy match on major.minor version across all directories.
+	// e.g. for version "8.2.23", also match "8.2.27+1" if exact match not found
+	const majorMinor = version.split('.').slice(0, 2).join('.');
+	const fuzzyPrefix = `${serviceName}-${majorMinor}`;
+
+	for (const lightningDir of dirsToCheck) {
+		try {
+			const entries = await fs.readdir(lightningDir);
 			const fuzzyMatch = entries
 				.filter(entry => entry.startsWith(fuzzyPrefix))
 				.sort()
 				.pop(); // Take the latest version
-
 			if (fuzzyMatch) {
 				return path.join(lightningDir, fuzzyMatch);
 			}
