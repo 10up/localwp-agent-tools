@@ -47,6 +47,36 @@ export function getLightningServicesPath(): string {
 }
 
 /**
+ * Returns all lightning-services directories that exist on disk.
+ *
+ * Services can be installed in both the bundled app directory and the user data
+ * directory. When a user upgrades a service (e.g. PHP) through Local's UI, the
+ * new version is installed to the user data directory while the bundled version
+ * remains in the app directory. Both locations must be searched to find all
+ * available service versions.
+ *
+ * Returns bundled paths first (higher priority), then the user data path.
+ */
+function getAllLightningServicesPaths(): string[] {
+	const paths: string[] = [];
+
+	const appResourceCandidates = getLocalAppResourcesCandidates();
+	for (const candidate of appResourceCandidates) {
+		const bundledPath = path.join(candidate, 'lightning-services');
+		if (fs.existsSync(bundledPath)) {
+			paths.push(bundledPath);
+		}
+	}
+
+	const userDataPath = path.join(getLocalDataPath(), 'lightning-services');
+	if (fs.existsSync(userDataPath) && !paths.includes(userDataPath)) {
+		paths.push(userDataPath);
+	}
+
+	return paths;
+}
+
+/**
  * Returns the path to Local's run directory for a specific site.
  * This directory contains runtime files like MySQL sockets.
  *
@@ -114,36 +144,41 @@ function getBinaryPlatformDirCandidates(): string[] {
  * @returns The full path to the service directory, or null if not found
  */
 async function findServiceDir(serviceName: string, version: string): Promise<string | null> {
-	const lightningDir = getLightningServicesPath();
+	const lightningDirs = getAllLightningServicesPaths();
+	const prefix = `${serviceName}-${version}`;
 
-	try {
-		const entries = await fs.readdir(lightningDir);
-
-		// Look for an exact prefix match: "{serviceName}-{version}+"
-		// e.g. "php-8.2.27+1" matches serviceName="php", version="8.2.27"
-		const prefix = `${serviceName}-${version}`;
-		const match = entries.find(entry =>
-			entry === prefix || entry.startsWith(prefix + '+')
-		);
-
-		if (match) {
-			return path.join(lightningDir, match);
+	// First pass: look for an exact prefix match across all directories
+	for (const lightningDir of lightningDirs) {
+		try {
+			const entries = await fs.readdir(lightningDir);
+			const match = entries.find(entry =>
+				entry === prefix || entry.startsWith(prefix + '+')
+			);
+			if (match) {
+				return path.join(lightningDir, match);
+			}
+		} catch (err) {
+			// Directory doesn't exist or can't be read
 		}
+	}
 
-		// Fallback: look for any directory starting with "{serviceName}-{majorVersion}"
-		// e.g. for version "8.2.23", also match "8.2.27+1" if exact match not found
-		const majorMinor = version.split('.').slice(0, 2).join('.');
-		const fuzzyPrefix = `${serviceName}-${majorMinor}`;
-		const fuzzyMatch = entries
-			.filter(entry => entry.startsWith(fuzzyPrefix))
-			.sort()
-			.pop(); // Take the latest version
+	// Second pass: fuzzy match on major.minor version across all directories
+	const majorMinor = version.split('.').slice(0, 2).join('.');
+	const fuzzyPrefix = `${serviceName}-${majorMinor}`;
 
-		if (fuzzyMatch) {
-			return path.join(lightningDir, fuzzyMatch);
+	for (const lightningDir of lightningDirs) {
+		try {
+			const entries = await fs.readdir(lightningDir);
+			const fuzzyMatch = entries
+				.filter(entry => entry.startsWith(fuzzyPrefix))
+				.sort()
+				.pop(); // Take the latest version
+			if (fuzzyMatch) {
+				return path.join(lightningDir, fuzzyMatch);
+			}
+		} catch (err) {
+			// Directory doesn't exist or can't be read
 		}
-	} catch (err) {
-		// Directory doesn't exist or can't be read
 	}
 
 	return null;
