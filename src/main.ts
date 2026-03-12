@@ -99,8 +99,7 @@ let mcpServerPort = 0;
 // ---------------------------------------------------------------------------
 
 function getSitePath(site: Local.Site): string {
-	const rawPath = (site as any).longPath || site.path;
-	return resolveSitePath(rawPath);
+	return resolveSitePath(site.longPath || site.path);
 }
 
 function getProjectPath(sitePath: string, projectDir: string): string {
@@ -109,14 +108,14 @@ function getProjectPath(sitePath: string, projectDir: string): string {
 }
 
 function getStoredProjectDir(site: Local.Site): string {
-	return (site as any).customOptions?.agentToolsProjectDir || '';
+	return site.customOptions?.agentToolsProjectDir || '';
 }
 
 function getStoredAgents(site: Local.Site): AgentTarget[] {
-	const stored = (site as any).customOptions?.agentToolsAgents;
+	const stored = site.customOptions?.agentToolsAgents;
 	if (Array.isArray(stored) && stored.length > 0) return stored;
 	// Migration: old sites that were enabled before multi-agent support default to claude
-	if ((site as any).customOptions?.agentToolsEnabled) return ['claude'];
+	if (site.customOptions?.agentToolsEnabled) return ['claude'];
 	return [];
 }
 
@@ -137,7 +136,7 @@ function execCommand(command: string, args: string[], options: { cwd?: string; e
 }
 
 function isAgentToolsEnabled(site: Local.Site): boolean {
-	return !!(site as any).customOptions?.agentToolsEnabled;
+	return !!site.customOptions?.agentToolsEnabled;
 }
 
 function escapeRegex(str: string): string {
@@ -153,7 +152,7 @@ async function buildSiteConfig(site: Local.Site): Promise<SiteConfig> {
 	const siteId = site.id;
 
 	const phpVersion = site.services?.php?.version || '';
-	const mysqlService = site.services?.mysql || (site.services as any)?.mariadb;
+	const mysqlService = site.services?.mysql || site.services?.mariadb;
 	const mysqlVersion = mysqlService?.version || '';
 	const mysqlServiceName = mysqlService?.name || 'mysql';
 
@@ -298,11 +297,11 @@ async function removeEmptyParentDirs(filePath: string): Promise<void> {
 async function generateProjectContext(site: Local.Site): Promise<string> {
 	const sitePath = getSitePath(site);
 	const phpVersion = site.services?.php?.version || 'unknown';
-	const mysqlService = site.services?.mysql || (site.services as any)?.mariadb;
+	const mysqlService = site.services?.mysql || site.services?.mariadb;
 	const mysqlVersion = mysqlService?.version || 'unknown';
-	const webServer = site.services?.nginx ? 'nginx' : (site.services as any)?.apache ? 'Apache' : 'unknown';
-	const multiSite = (site as any).multiSite;
-	const multisiteType = multiSite === 'ms-subdomain' ? 'Yes (subdomain)' : multiSite === 'ms-subdirectory' ? 'Yes (subdirectory)' : 'No';
+	const webServer = site.services?.nginx ? 'nginx' : site.services?.apache ? 'Apache' : 'unknown';
+	const multiSite = site.multiSite;
+	const multisiteType = multiSite === 'ms-subdomain' ? 'Yes (subdomain)' : multiSite === 'ms-subdir' ? 'Yes (subdirectory)' : 'No';
 
 	let pluginsSection = '';
 	let themeSection = '';
@@ -547,12 +546,12 @@ async function setupSite(site: Local.Site, notifier: any, projectDir: string, ag
 	// 5. Store state
 	LocalMain.SiteData.updateSite(site.id, {
 		customOptions: {
-			...(site as any).customOptions,
+			...site.customOptions,
 			agentToolsEnabled: true,
 			agentToolsProjectDir: projectDir,
 			agentToolsAgents: agents,
 		},
-	} as any);
+	});
 
 	const agentLabels = agents.map(a => AGENT_TARGETS[a].label).join(', ');
 	notifier.notify({
@@ -587,12 +586,12 @@ async function teardownSite(site: Local.Site, notifier: any): Promise<void> {
 	await updateGitignore(projectPath, []);
 
 	// 5. Unmark site
-	const customOptions = { ...(site as any).customOptions };
+	const customOptions = { ...site.customOptions };
 	delete customOptions.agentToolsEnabled;
 	delete customOptions.agentToolsProjectDir;
 	delete customOptions.agentToolsAgents;
 
-	LocalMain.SiteData.updateSite(site.id, { customOptions } as any);
+	LocalMain.SiteData.updateSite(site.id, { customOptions });
 
 	notifier.notify({
 		title: 'Agent Tools',
@@ -634,10 +633,10 @@ async function changeProjectDir(site: Local.Site, newProjectDir: string, notifie
 
 	LocalMain.SiteData.updateSite(site.id, {
 		customOptions: {
-			...(site as any).customOptions,
+			...site.customOptions,
 			agentToolsProjectDir: newProjectDir,
 		},
-	} as any);
+	});
 
 	notifier.notify({
 		title: 'Agent Tools',
@@ -683,10 +682,10 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 
 	LocalMain.SiteData.updateSite(site.id, {
 		customOptions: {
-			...(site as any).customOptions,
+			...site.customOptions,
 			agentToolsAgents: newAgents,
 		},
-	} as any);
+	});
 
 	const agentLabels = newAgents.map(a => AGENT_TARGETS[a].label).join(', ');
 	notifier.notify({
