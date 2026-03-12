@@ -2,7 +2,6 @@ import * as path from 'path';
 import * as fs from 'fs-extra';
 import * as Local from '@getflywheel/local';
 import * as LocalMain from '@getflywheel/local/main';
-import { execFile } from 'child_process';
 import {
 	resolveSitePath,
 	findPhpBinary,
@@ -119,21 +118,6 @@ function getStoredAgents(site: Local.Site): AgentTarget[] {
 	return [];
 }
 
-function execCommand(command: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): Promise<string> {
-	return new Promise((resolve, reject) => {
-		execFile(command, args, {
-			cwd: options.cwd,
-			env: { ...process.env, ...options.env },
-			maxBuffer: 10 * 1024 * 1024,
-		}, (error, stdout, stderr) => {
-			if (error) {
-				reject(new Error(`Command failed: ${command} ${args.join(' ')}\n${stderr || error.message}`));
-			} else {
-				resolve(stdout);
-			}
-		});
-	});
-}
 
 function isAgentToolsEnabled(site: Local.Site): boolean {
 	return !!site.customOptions?.agentToolsEnabled;
@@ -294,83 +278,14 @@ async function removeEmptyParentDirs(filePath: string): Promise<void> {
 // Project Context — Safe Merge with Markers
 // ---------------------------------------------------------------------------
 
-async function generateProjectContext(site: Local.Site): Promise<string> {
-	const sitePath = getSitePath(site);
-	const phpVersion = site.services?.php?.version || 'unknown';
-	const mysqlService = site.services?.mysql || site.services?.mariadb;
-	const mysqlVersion = mysqlService?.version || 'unknown';
-	const webServer = site.services?.nginx ? 'nginx' : site.services?.apache ? 'Apache' : 'unknown';
-	const multiSite = site.multiSite;
-	const multisiteType = multiSite === 'ms-subdomain' ? 'Yes (subdomain)' : multiSite === 'ms-subdir' ? 'Yes (subdirectory)' : 'No';
-
-	let pluginsSection = '';
-	let themeSection = '';
-	let wpVersion = '';
-
-	const wpCliBin = await findWpCli(phpVersion);
-	const phpBin = await findPhpBinary(phpVersion);
-
-	if (wpCliBin && phpBin) {
-		const wpPath = path.join(sitePath, 'app', 'public');
-		const wpCliEnv: NodeJS.ProcessEnv = { ...process.env, PHP: phpBin };
-		const mysqlSocket = findMysqlSocket(site.id);
-
-		try {
-			const isWpCliPhar = wpCliBin.endsWith('.phar');
-			const wpCmd = isWpCliPhar ? phpBin : wpCliBin;
-			const wpBaseArgs = isWpCliPhar
-				? [wpCliBin, '--path=' + wpPath]
-				: ['--path=' + wpPath];
-
-			if (mysqlSocket) wpCliEnv.DB_SOCKET = mysqlSocket;
-
-			try {
-				const versionOutput = await execCommand(wpCmd, [...wpBaseArgs, 'core', 'version'], { cwd: wpPath, env: wpCliEnv });
-				wpVersion = versionOutput.trim();
-			} catch { /* site may not be running */ }
-
-			try {
-				const pluginOutput = await execCommand(wpCmd, [...wpBaseArgs, 'plugin', 'list', '--status=active', '--format=csv', '--fields=name,version'], { cwd: wpPath, env: wpCliEnv });
-				const lines = pluginOutput.trim().split('\n').slice(1);
-				if (lines.length > 0 && lines[0]) {
-					pluginsSection = '\n## Active Plugins\n' + lines.map(line => {
-						const [name, version] = line.split(',');
-						return `- ${name} ${version || ''}`.trim();
-					}).join('\n') + '\n';
-				}
-			} catch { /* site may not be running */ }
-
-			try {
-				const themeOutput = await execCommand(wpCmd, [...wpBaseArgs, 'theme', 'list', '--status=active', '--format=csv', '--fields=name,version'], { cwd: wpPath, env: wpCliEnv });
-				const lines = themeOutput.trim().split('\n').slice(1);
-				if (lines.length > 0 && lines[0]) {
-					themeSection = '\n## Active Theme\n' + lines.map(line => {
-						const [name, version] = line.split(',');
-						return `- ${name} ${version || ''}`.trim();
-					}).join('\n') + '\n';
-				}
-			} catch { /* site may not be running */ }
-		} catch {
-			// WP-CLI calls may fail if the site isn't started
-		}
-	}
-
-	const wpVersionLine = wpVersion ? `- WordPress: ${wpVersion}` : '- WordPress: (start site to detect)';
-
+function generateProjectContext(site: Local.Site): string {
 	return `# WordPress Site: ${site.name}
 
-This is a WordPress site managed by Local.
+This is a WordPress site managed by [Local](https://localwp.com/). It has a Local MCP server configured that provides tools for interacting with the site.
 
-## Environment
-- PHP: ${phpVersion}
-- MySQL: ${mysqlVersion}
-- Web Server: ${webServer}
-${wpVersionLine}
-- Site URL: https://${site.domain}
-- Multisite: ${multisiteType}
-${pluginsSection}${themeSection}
-## File Structure
-- Site root: ${sitePath}
+Use the \`get_site_info\` tool to get environment details (PHP/MySQL versions, paths, active plugins, theme, etc.).
+
+## File Structure (relative to site root)
 - WordPress root: app/public/
 - Theme files: app/public/wp-content/themes/
 - Plugin files: app/public/wp-content/plugins/
@@ -378,23 +293,9 @@ ${pluginsSection}${themeSection}
 - Logs: logs/
 - Local config: conf/
 
-## MCP Tools Available
-This project has a Local MCP server configured.
-You can use the following tools to interact with the site:
-
-- **wp_cli** — Run any WP-CLI command (use this for database queries, imports, exports, search-replace, etc.)
-- **read_error_log** — Read and parse the PHP error log
-- **read_access_log** — Read the web server access log
-- **read_wp_config** — Parse wp-config.php constants
-- **edit_wp_config** — Modify wp-config.php constants safely
-- **get_site_info** — Get site metadata and environment info
-- **site_health_check** — Run a comprehensive site health check
-- **wp_debug_toggle** — Enable/disable WP_DEBUG and related constants
-
 ## Notes
-- WP-CLI commands run with the site's PHP version.
-- For database operations, prefer WP-CLI commands (e.g. \`wp db query\`, \`wp db export\`, \`wp search-replace\`, \`wp option update\`).
-- This file was auto-generated by the "Agent Tools" add-on. Regenerate it from Local if your site configuration changes.
+- For database operations, prefer WP-CLI commands via the \`wp_cli\` tool (e.g. \`wp db query\`, \`wp db export\`, \`wp search-replace\`).
+- This file was auto-generated by the Agent Tools add-on for Local.
 `;
 }
 
@@ -524,7 +425,7 @@ async function setupSite(site: Local.Site, notifier: any, projectDir: string, ag
 	siteConfigRegistry.register(siteConfig);
 
 	// 2. Generate project context
-	const contextContent = await generateProjectContext(site);
+	const contextContent = generateProjectContext(site);
 
 	// 3. For each selected agent, write configs
 	for (const agent of agents) {
@@ -619,7 +520,7 @@ async function changeProjectDir(site: Local.Site, newProjectDir: string, notifie
 	await updateGitignore(oldPath, []);
 
 	// Write configs to new location
-	const contextContent = await generateProjectContext(site);
+	const contextContent = generateProjectContext(site);
 
 	for (const agent of agents) {
 		const agentConfig = AGENT_TARGETS[agent];
@@ -666,7 +567,7 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 
 	// Add configs for newly selected agents
 	if (added.length > 0) {
-		const contextContent = await generateProjectContext(site);
+		const contextContent = generateProjectContext(site);
 
 		for (const agent of added) {
 			const agentConfig = AGENT_TARGETS[agent];
@@ -707,7 +608,7 @@ async function regenerateConfig(site: Local.Site): Promise<void> {
 	const siteConfig = await buildSiteConfig(site);
 	siteConfigRegistry.register(siteConfig);
 
-	const contextContent = await generateProjectContext(site);
+	const contextContent = generateProjectContext(site);
 
 	for (const agent of agents) {
 		const agentConfig = AGENT_TARGETS[agent];
