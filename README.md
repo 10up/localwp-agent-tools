@@ -130,6 +130,18 @@ agent-tools/
 
 macOS (darwin-arm64 and darwin-x64), Windows, and Linux.
 
-## License
+## Support Level
 
-MIT
+**Active:** 10up is actively working on this, and we expect to continue work for the foreseeable future including keeping tested up to the most recent version of Local. Bug reports, feature requests, questions, and pull requests are welcome.
+
+## Changelog
+
+A complete listing of all notable changes to Agent Tools are documented in [CHANGELOG.md](https://github.com/10up/localwp-agent-tools/blob/main/CHANGELOG.md).
+
+## Contributing
+
+Please read [CODE_OF_CONDUCT.md](https://github.com/10up/localwp-agent-tools/blob/main/CODE_OF_CONDUCT.md) for details on our code of conduct, [CONTRIBUTING.md](https://github.com/10up/localwp-agent-tools/blob/main/CONTRIBUTING.md) for details on the process for submitting pull requests to us, and [CREDITS.md](https://github.com/10up/localwp-agent-tools/blob/main/CREDITS.md) for a listing of maintainers, contributors, and libraries for Agent Tools.
+
+## Like what you see?
+
+[![Work with the 10up WordPress Practice at Fueled](https://github.com/10up/.github/blob/trunk/profile/10up-github-banner.jpg)](http://10up.com/contact/)
