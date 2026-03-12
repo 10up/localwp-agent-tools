@@ -94,6 +94,33 @@ export async function handleTool(
 }
 
 // ── read_error_log ─────────────────────────────────────────────────────
+
+/**
+ * Finds the most relevant PHP error log file.
+ *
+ * When WP_DEBUG and WP_DEBUG_LOG are true, WordPress calls
+ * ini_set('error_log', WP_CONTENT_DIR . '/debug.log') which redirects
+ * PHP errors away from the server's error.log to wp-content/debug.log.
+ * We check both locations and return whichever was modified most recently.
+ */
+async function findErrorLog(config: SiteConfig): Promise<string | null> {
+	const serverLog = path.join(config.logPath, 'php', 'error.log');
+	const debugLog = path.join(config.wpPath, 'wp-content', 'debug.log');
+
+	const serverExists = existsSync(serverLog);
+	const debugExists = existsSync(debugLog);
+
+	if (serverExists && debugExists) {
+		const serverMtime = (await stat(serverLog)).mtimeMs;
+		const debugMtime = (await stat(debugLog)).mtimeMs;
+		return debugMtime >= serverMtime ? debugLog : serverLog;
+	}
+
+	if (debugExists) return debugLog;
+	if (serverExists) return serverLog;
+	return null;
+}
+
 async function handleReadErrorLog(
 	args: Record<string, unknown>,
 	config: SiteConfig,
@@ -101,10 +128,10 @@ async function handleReadErrorLog(
 	const numLines = Number(args.lines ?? 50);
 	const filter = args.filter ? String(args.filter) : null;
 
-	const logFile = path.join(config.logPath, 'php', 'error.log');
-	if (!existsSync(logFile)) {
+	const logFile = await findErrorLog(config);
+	if (!logFile) {
 		return {
-			content: [{ type: 'text', text: `PHP error log not found at: ${logFile}` }],
+			content: [{ type: 'text', text: `PHP error log not found. Searched:\n  ${path.join(config.logPath, 'php', 'error.log')}\n  ${path.join(config.wpPath, 'wp-content', 'debug.log')}` }],
 		};
 	}
 
