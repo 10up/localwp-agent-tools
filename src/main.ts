@@ -299,13 +299,7 @@ Use the \`get_site_info\` tool to get environment details (PHP/MySQL versions, p
 `;
 }
 
-async function writeContextFile(filePath: string, content: string, agent: AgentTarget): Promise<void> {
-	if (agent === 'claude') {
-		await fs.ensureDir(path.dirname(filePath));
-		await fs.writeFile(filePath, content, 'utf-8');
-		return;
-	}
-
+async function writeContextFile(filePath: string, content: string, _agent: AgentTarget): Promise<void> {
 	const markedContent = `${CONTEXT_MARKER_START}\n${content}\n${CONTEXT_MARKER_END}`;
 
 	await fs.ensureDir(path.dirname(filePath));
@@ -330,13 +324,8 @@ async function writeContextFile(filePath: string, content: string, agent: AgentT
 	}
 }
 
-async function removeContextFile(filePath: string, agent: AgentTarget): Promise<void> {
+async function removeContextFile(filePath: string, _agent: AgentTarget): Promise<void> {
 	if (!await fs.pathExists(filePath)) return;
-
-	if (agent === 'claude') {
-		await fs.remove(filePath);
-		return;
-	}
 
 	let content = await fs.readFile(filePath, 'utf-8');
 
