@@ -20,6 +20,10 @@ import {
 	handleTool as handleEnvironmentTool,
 	LocalApi,
 } from './environment';
+import {
+	toolDefinitions as snapshotTools,
+	handleTool as handleSnapshotTool,
+} from './snapshot';
 
 export type { LocalApi } from './environment';
 
@@ -32,6 +36,7 @@ export const allToolDefinitions = [
 	...configTools,
 	...siteTools,
 	...environmentTools,
+	...snapshotTools,
 ];
 
 // Unified handler type: (name, args, config, localApi) => ToolResult
@@ -59,6 +64,9 @@ for (const tool of siteTools) {
 }
 for (const tool of environmentTools) {
 	toolHandlerMap[tool.name] = (name, args, config, localApi) => handleEnvironmentTool(name, args, config, localApi);
+}
+for (const tool of snapshotTools) {
+	toolHandlerMap[tool.name] = (name, args, config, _localApi) => handleSnapshotTool(name, args, config);
 }
 
 /**
