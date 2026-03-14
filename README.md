@@ -69,10 +69,28 @@ Copy the built add-on to Local's add-ons directory:
 # macOS
 cp -r . ~/Library/Application\ Support/Local/addons/agent-tools/
 
-# Install production dependencies in the installed location
-cd ~/Library/Application\ Support/Local/addons/agent-tools/
-npm install --production --ignore-scripts
+# Linux
+cp -r . ~/.config/Local/addons/agent-tools/
 
+# Windows (PowerShell)
+Copy-Item -Recurse -Force . "$env:APPDATA\Local\addons\agent-tools"
+```
+
+Install production dependencies in the installed location and restart Local:
+
+```bash
+# macOS
+cd ~/Library/Application\ Support/Local/addons/agent-tools/
+
+# Linux
+cd ~/.config/Local/addons/agent-tools/
+
+# Windows (PowerShell)
+cd "$env:APPDATA\Local\addons\agent-tools"
+```
+
+```bash
+npm install --production --ignore-scripts
 # Then restart Local
 ```
 
@@ -89,7 +107,14 @@ npm run watch
 After building, sync to the installed add-on:
 
 ```bash
+# macOS
 cp -R lib/* ~/Library/Application\ Support/Local/addons/agent-tools/lib/
+
+# Linux
+cp -R lib/* ~/.config/Local/addons/agent-tools/lib/
+
+# Windows (PowerShell)
+Copy-Item -Recurse -Force lib\* "$env:APPDATA\Local\addons\agent-tools\lib"
 ```
 
 Then restart Local to pick up changes.
