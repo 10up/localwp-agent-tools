@@ -425,3 +425,32 @@ export function getLocalAppResourcesPath(): string | null {
 	}
 	return null;
 }
+
+/**
+ * Returns platform-specific environment variables needed to run Local's
+ * bundled PHP binary. This mirrors the logic in Local's own PhpService.js.
+ *
+ * On Linux, the bundled PHP binary has no RPATH/RUNPATH and depends on
+ * LD_LIBRARY_PATH to locate its shared libraries (libtidy, libssl, etc.)
+ * in the `shared-libs/` directory adjacent to the `bin/` directory.
+ *
+ * On macOS, PHP uses @rpath/@loader_path — no env vars needed.
+ * On Windows, DLLs are co-located with php.exe — no env vars needed.
+ *
+ * @param phpBin  Full path to the PHP binary
+ * @returns An object of environment variables to spread into the env
+ */
+export function getPhpEnvironment(phpBin: string): Record<string, string> {
+	if (process.platform !== 'linux') {
+		return {};
+	}
+
+	// PHP binary is at: {serviceDir}/bin/linux/bin/php
+	// Shared libs are at: {serviceDir}/bin/linux/shared-libs/
+	const sharedLibsDir = path.join(path.dirname(phpBin), '..', 'shared-libs');
+	if (fs.existsSync(sharedLibsDir)) {
+		return { LD_LIBRARY_PATH: sharedLibsDir };
+	}
+
+	return {};
+}

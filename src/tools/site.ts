@@ -4,6 +4,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
 import { SiteConfig } from '../helpers/site-config';
+import { getPhpEnvironment } from '../helpers/paths';
 
 const execFileAsync = promisify(execFile);
 
@@ -12,6 +13,7 @@ function wpCliEnv(config: SiteConfig): NodeJS.ProcessEnv {
 	const mysqlBinDir = config.mysqlBin ? path.dirname(config.mysqlBin) : '';
 	return {
 		...process.env,
+		...getPhpEnvironment(config.phpBin),
 		PHP: config.phpBin,
 		PATH: mysqlBinDir ? `${mysqlBinDir}:${process.env.PATH || ''}` : process.env.PATH,
 		// DB connection vars — used by native MySQL tools (mysql, mysqldump, mysqlcheck)
@@ -105,7 +107,10 @@ async function handleGetSiteInfo(config: SiteConfig): Promise<{
 
 	// Get PHP version
 	try {
-		const { stdout } = await execFileAsync(config.phpBin, ['-v'], { timeout: 5_000 });
+		const { stdout } = await execFileAsync(config.phpBin, ['-v'], {
+			timeout: 5_000,
+			env: { ...process.env, ...getPhpEnvironment(config.phpBin) },
+		});
 		const phpVersionMatch = stdout.match(/PHP\s+([\d.]+)/);
 		info.phpVersion = phpVersionMatch ? phpVersionMatch[1] : stdout.split('\n')[0];
 	} catch {
@@ -323,7 +328,10 @@ async function handleSiteHealthCheck(config: SiteConfig): Promise<{
 
 	// 5. PHP version
 	try {
-		const { stdout } = await execFileAsync(config.phpBin, ['-v'], { timeout: 5_000 });
+		const { stdout } = await execFileAsync(config.phpBin, ['-v'], {
+			timeout: 5_000,
+			env: { ...process.env, ...getPhpEnvironment(config.phpBin) },
+		});
 		const phpVersionMatch = stdout.match(/PHP\s+([\d.]+)/);
 		const phpVersion = phpVersionMatch ? phpVersionMatch[1] : 'unknown';
 
