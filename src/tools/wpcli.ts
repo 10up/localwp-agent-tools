@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import { SiteConfig } from '../helpers/site-config';
+import { getPhpEnvironment } from '../helpers/paths';
 
 const execFileAsync = promisify(execFile);
 
@@ -53,6 +54,7 @@ async function runWpCli(
 
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
+		...getPhpEnvironment(config.phpBin),
 		PHP: config.phpBin,
 		PATH: envPath,
 		// DB connection vars — used by native MySQL tools (mysql, mysqldump, mysqlcheck)
