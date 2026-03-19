@@ -20,12 +20,24 @@ const {
 /* eslint-enable @typescript-eslint/no-var-requires */
 
 // ---------------------------------------------------------------------------
+// MCP SDK Type Aliases
+// TODO: Replace with proper types when the MCP SDK ships TypeScript declarations
+// ---------------------------------------------------------------------------
+
+/** Transport instance from @modelcontextprotocol/sdk */
+type McpTransport = any;
+/** Server instance from @modelcontextprotocol/sdk */
+type McpServer = any;
+/** Request object from MCP SDK request handlers */
+type McpRequest = any;
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 interface SessionEntry {
-	transport: any;
-	server: any;
+	transport: McpTransport;
+	server: McpServer;
 	siteId: string;
 	lastActivity: number;
 }
@@ -93,7 +105,7 @@ function closeAllSessions(): void {
 // MCP Server Factory — creates a Server instance for a specific site
 // ---------------------------------------------------------------------------
 
-function createMcpServer(siteId: string, registry: SiteConfigRegistry, localApi: LocalApi): any {
+function createMcpServer(siteId: string, registry: SiteConfigRegistry, localApi: LocalApi): McpServer {
 	const server = new Server(
 		{ name: 'local-wp', version: '1.0.0' },
 		{ capabilities: { tools: {} } },
@@ -103,7 +115,7 @@ function createMcpServer(siteId: string, registry: SiteConfigRegistry, localApi:
 		return { tools: allToolDefinitions };
 	});
 
-	server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
+	server.setRequestHandler(CallToolRequestSchema, async (request: McpRequest) => {
 		const { name, arguments: args } = request.params;
 		console.log(`[Agent Tools] Tool called: ${name} (site: ${siteId})`);
 
@@ -208,7 +220,7 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 		try {
 			if (method === 'POST') {
 				const bodyStr = await readBody(req);
-				let body: any;
+				let body: McpRequest;
 				try {
 					body = JSON.parse(bodyStr);
 				} catch {
@@ -227,7 +239,7 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 
 				// New session — must be an initialize request
 				const isInit = body?.method === 'initialize' ||
-					(Array.isArray(body) && body.some((msg: any) => msg?.method === 'initialize'));
+					(Array.isArray(body) && body.some((msg: McpRequest) => msg?.method === 'initialize'));
 
 				if (!isInit) {
 					res.writeHead(400, { 'Content-Type': 'application/json' });
