@@ -166,18 +166,6 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 		const url = (req.url || '').split('?')[0]; // strip query string
 		const method = req.method || 'GET';
 
-		// CORS headers for local development
-		res.setHeader('Access-Control-Allow-Origin', '*');
-		res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-		res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id');
-		res.setHeader('Access-Control-Expose-Headers', 'mcp-session-id');
-
-		if (method === 'OPTIONS') {
-			res.writeHead(204);
-			res.end();
-			return;
-		}
-
 		// Health check
 		if (url === '/health' && method === 'GET') {
 			const sites = registry.getAllIds();
