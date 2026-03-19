@@ -1,9 +1,8 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { existsSync } from 'fs';
-import * as path from 'path';
 import { SiteConfig } from '../helpers/site-config';
-import { getPhpEnvironment } from '../helpers/paths';
+import { buildWpCliEnv } from '../helpers/utils';
 
 const execFileAsync = promisify(execFile);
 
@@ -70,31 +69,7 @@ async function runWpCli(
 
 	const timeout = options?.timeout ?? 60_000;
 
-	// Add MySQL binary directory to PATH so WP-CLI commands like `db check`
-	// can find `mysqlcheck`, `mysqldump`, etc.
-	const mysqlBinDir = config.mysqlBin ? path.dirname(config.mysqlBin) : '';
-	const envPath = mysqlBinDir
-		? `${mysqlBinDir}${path.delimiter}${process.env.PATH || ''}`
-		: process.env.PATH || '';
-
-	const env: NodeJS.ProcessEnv = {
-		...process.env,
-		...getPhpEnvironment(config.phpBin),
-		PHP: config.phpBin,
-		PATH: envPath,
-		// DB connection vars — used by native MySQL tools (mysql, mysqldump, mysqlcheck)
-		// that WP-CLI shells out to for `wp db` commands
-		...(config.dbSocket ? { MYSQL_UNIX_PORT: config.dbSocket } : {}),
-		...(config.dbHost ? { MYSQL_HOST: config.dbHost } : {}),
-		...(config.dbPort ? { MYSQL_TCP_PORT: String(config.dbPort) } : {}),
-		MYSQL_PWD: config.dbPassword || '',
-		DB_HOST: config.dbHost || 'localhost',
-		DB_USER: config.dbUser || 'root',
-		DB_PASSWORD: config.dbPassword || 'root',
-		DB_NAME: config.dbName || 'local',
-		...(config.dbSocket ? { DB_SOCKET: config.dbSocket } : {}),
-		...(config.dbPort ? { DB_PORT: String(config.dbPort) } : {}),
-	};
+	const env = buildWpCliEnv(config);
 
 	return execFileAsync(config.phpBin, cmdArgs, {
 		cwd: config.wpPath,

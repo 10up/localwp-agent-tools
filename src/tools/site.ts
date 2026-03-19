@@ -5,30 +5,9 @@ import { promisify } from 'util';
 import * as path from 'path';
 import { SiteConfig } from '../helpers/site-config';
 import { getPhpEnvironment } from '../helpers/paths';
+import { buildWpCliEnv } from '../helpers/utils';
 
 const execFileAsync = promisify(execFile);
-
-/** Build an env object for WP-CLI calls that includes MySQL binaries and DB connection vars. */
-function wpCliEnv(config: SiteConfig): NodeJS.ProcessEnv {
-	const mysqlBinDir = config.mysqlBin ? path.dirname(config.mysqlBin) : '';
-	return {
-		...process.env,
-		...getPhpEnvironment(config.phpBin),
-		PHP: config.phpBin,
-		PATH: mysqlBinDir ? `${mysqlBinDir}${path.delimiter}${process.env.PATH || ''}` : process.env.PATH,
-		// DB connection vars — used by native MySQL tools (mysql, mysqldump, mysqlcheck)
-		...(config.dbSocket ? { MYSQL_UNIX_PORT: config.dbSocket } : {}),
-		...(config.dbHost ? { MYSQL_HOST: config.dbHost } : {}),
-		...(config.dbPort ? { MYSQL_TCP_PORT: String(config.dbPort) } : {}),
-		MYSQL_PWD: config.dbPassword || '',
-		DB_HOST: config.dbHost || 'localhost',
-		DB_USER: config.dbUser || 'root',
-		DB_PASSWORD: config.dbPassword || 'root',
-		DB_NAME: config.dbName || 'local',
-		...(config.dbSocket ? { DB_SOCKET: config.dbSocket } : {}),
-		...(config.dbPort ? { DB_PORT: String(config.dbPort) } : {}),
-	};
-}
 
 // ── Tool Definitions ───────────────────────────────────────────────────
 export const toolDefinitions = [
@@ -151,7 +130,7 @@ async function handleGetSiteInfo(config: SiteConfig): Promise<{
 			const { stdout: pluginOut } = await execFileAsync(
 				config.phpBin,
 				wpCliArgs(['plugin', 'list', '--status=active', '--format=json']),
-				{ cwd: config.wpPath, timeout: 15_000, env: wpCliEnv(config) },
+				{ cwd: config.wpPath, timeout: 15_000, env: buildWpCliEnv(config) },
 			);
 			info.activePlugins = JSON.parse(pluginOut);
 		} catch {
@@ -162,7 +141,7 @@ async function handleGetSiteInfo(config: SiteConfig): Promise<{
 			const { stdout: themeOut } = await execFileAsync(
 				config.phpBin,
 				wpCliArgs(['theme', 'list', '--status=active', '--format=json']),
-				{ cwd: config.wpPath, timeout: 15_000, env: wpCliEnv(config) },
+				{ cwd: config.wpPath, timeout: 15_000, env: buildWpCliEnv(config) },
 			);
 			info.activeTheme = JSON.parse(themeOut);
 		} catch {
@@ -190,7 +169,7 @@ async function handleSiteHealthCheck(config: SiteConfig): Promise<{
 				wpCliArgs.push('-d', `pdo_mysql.default_socket=${config.dbSocket}`);
 			}
 			wpCliArgs.push(config.wpCliBin, 'db', 'check', `--path=${config.wpPath}`, '--skip-themes', '--skip-plugins');
-			await execFileAsync(config.phpBin, wpCliArgs, { cwd: config.wpPath, timeout: 15_000, env: wpCliEnv(config) });
+			await execFileAsync(config.phpBin, wpCliArgs, { cwd: config.wpPath, timeout: 15_000, env: buildWpCliEnv(config) });
 
 			const countArgs: string[] = [];
 			if (config.dbSocket) {
@@ -198,7 +177,7 @@ async function handleSiteHealthCheck(config: SiteConfig): Promise<{
 				countArgs.push('-d', `pdo_mysql.default_socket=${config.dbSocket}`);
 			}
 			countArgs.push(config.wpCliBin, 'db', 'query', 'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()', '--skip-column-names', `--path=${config.wpPath}`, '--skip-themes', '--skip-plugins');
-			const { stdout: countOut } = await execFileAsync(config.phpBin, countArgs, { cwd: config.wpPath, timeout: 15_000, env: wpCliEnv(config) });
+			const { stdout: countOut } = await execFileAsync(config.phpBin, countArgs, { cwd: config.wpPath, timeout: 15_000, env: buildWpCliEnv(config) });
 			const tableCount = parseInt(countOut.trim(), 10) || 0;
 
 			checks.push({
