@@ -59,3 +59,11 @@ export async function removePortFile(): Promise<void> {
 		// Best-effort cleanup
 	}
 }
+
+export function removePortFileSync(): void {
+	try {
+		fs.removeSync(PORT_FILE);
+	} catch {
+		// Best-effort cleanup
+	}
+}

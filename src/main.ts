@@ -10,7 +10,7 @@ import {
 	findWpCli,
 } from './helpers/paths';
 import { SiteConfig, SiteConfigRegistry } from './helpers/site-config';
-import { findAvailablePort, savePort, removePortFile } from './helpers/port';
+import { findAvailablePort, savePort, removePortFile, removePortFileSync } from './helpers/port';
 import { createMcpHttpServer, startMcpHttpServer, stopMcpHttpServer, closeSessionsForSite } from './mcp-server';
 import { LocalApi } from './tools';
 
@@ -767,9 +767,10 @@ export default function (context: LocalMain.AddonMainContext): void {
 	electron.app.on('will-quit', () => {
 		try {
 			if (httpServer) {
+				// Best-effort — process is exiting, no time to await
 				stopMcpHttpServer(httpServer);
 			}
-			removePortFile();
+			removePortFileSync();
 		} catch {
 			// Best-effort cleanup
 		}
