@@ -15,7 +15,7 @@ function wpCliEnv(config: SiteConfig): NodeJS.ProcessEnv {
 		...process.env,
 		...getPhpEnvironment(config.phpBin),
 		PHP: config.phpBin,
-		PATH: mysqlBinDir ? `${mysqlBinDir}:${process.env.PATH || ''}` : process.env.PATH,
+		PATH: mysqlBinDir ? `${mysqlBinDir}${path.delimiter}${process.env.PATH || ''}` : process.env.PATH,
 		// DB connection vars — used by native MySQL tools (mysql, mysqldump, mysqlcheck)
 		...(config.dbSocket ? { MYSQL_UNIX_PORT: config.dbSocket } : {}),
 		...(config.dbHost ? { MYSQL_HOST: config.dbHost } : {}),
