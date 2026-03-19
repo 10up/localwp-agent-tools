@@ -85,7 +85,6 @@ async function handleGetSiteInfo(config: SiteConfig): Promise<{
 		logPath: config.logPath,
 		database: {
 			name: config.dbName,
-			user: config.dbUser,
 			socket: config.dbSocket || null,
 			port: config.dbPort,
 		},
