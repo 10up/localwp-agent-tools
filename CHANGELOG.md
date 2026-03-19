@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file, per [the Ke
 - Testing framework with Vitest (93 tests across 11 files) (props [@claytoncollie](https://github.com/claytoncollie) via [#53](https://github.com/10up/localwp-agent-tools/pull/53)).
 - ESLint 9 and Prettier for consistent code style (props [@claytoncollie](https://github.com/claytoncollie) via [#53](https://github.com/10up/localwp-agent-tools/pull/53)).
 - GitHub Actions CI pipeline for lint, format, typecheck, test, and build (props [@claytoncollie](https://github.com/claytoncollie) via [#53](https://github.com/10up/localwp-agent-tools/pull/53)).
-- Automated release workflow triggered by version tags (props [@cchung85](https://github.com/cchung85) via [#54](https://github.com/10up/localwp-agent-tools/pull/54)).
+- Automated release workflow triggered by version tags (props [@christianc1](https://github.com/christianc1) via [#54](https://github.com/10up/localwp-agent-tools/pull/54)).
 - Retry with next port when MCP server port is taken on startup (props [@claytoncollie](https://github.com/claytoncollie) via [#47](https://github.com/10up/localwp-agent-tools/pull/47)).
 - Tail-read large log files (5 MB cap) to prevent memory spikes (props [@claytoncollie](https://github.com/claytoncollie) via [#41](https://github.com/10up/localwp-agent-tools/pull/41)).
 - 1 MB request body size limit on MCP HTTP server (props [@claytoncollie](https://github.com/claytoncollie) via [#39](https://github.com/10up/localwp-agent-tools/pull/39)).
@@ -33,7 +33,7 @@ All notable changes to this project will be documented in this file, per [the Ke
 ### Changed
 
 - Extract shared `buildWpCliEnv` and `escapeRegex` into `src/helpers/utils.ts` (props [@claytoncollie](https://github.com/claytoncollie) via [#51](https://github.com/10up/localwp-agent-tools/pull/51)).
-- Remove compiled `lib/` from version control; built on install via `prepare` script (props [@cchung85](https://github.com/cchung85) via [#54](https://github.com/10up/localwp-agent-tools/pull/54)).
+- Remove compiled `lib/` from version control; built on install via `prepare` script (props [@christianc1](https://github.com/christianc1) via [#54](https://github.com/10up/localwp-agent-tools/pull/54)).
 - Remove unused lodash dependency (props [@claytoncollie](https://github.com/claytoncollie) via [#42](https://github.com/10up/localwp-agent-tools/pull/42)).
 - Remove unused `getBinaryPlatformDir` function (props [@claytoncollie](https://github.com/claytoncollie) via [#43](https://github.com/10up/localwp-agent-tools/pull/43)).
 - Remove unused templates directory (props [@claytoncollie](https://github.com/claytoncollie) via [#44](https://github.com/10up/localwp-agent-tools/pull/44)).
