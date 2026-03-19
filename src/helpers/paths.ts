@@ -60,28 +60,6 @@ export function getRunPath(siteId: string): string {
 }
 
 /**
- * Returns the platform-specific binary subdirectory name.
- *
- * macOS arm64:   darwin-arm64
- * macOS x86_64:  darwin-x64 (or legacy "darwin")
- * Windows x64:   win64
- * Windows x86:   win32
- * Linux:         linux
- *
- * Falls back to checking the filesystem when the expected directory
- * does not exist, since Local WP naming conventions may vary.
- */
-function getBinaryPlatformDir(): string {
-	if (process.platform === 'darwin') {
-		return process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
-	}
-	if (process.platform === 'win32') {
-		return process.arch === 'x64' ? 'win64' : 'win32';
-	}
-	return 'linux';
-}
-
-/**
  * Returns an array of candidate binary platform directory names to try,
  * in priority order. This handles variations in Local WP's directory naming.
  */
