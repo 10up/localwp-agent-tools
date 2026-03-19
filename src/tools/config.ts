@@ -114,16 +114,23 @@ async function handleEditWpConfig(
 
 	if (!/^[A-Z_][A-Z0-9_]*$/i.test(constantName)) {
 		return {
-			content: [{ type: 'text', text: 'Error: Invalid constant name. Only letters, digits, and underscores are allowed.' }],
+			content: [
+				{
+					type: 'text',
+					text: 'Error: Invalid constant name. Only letters, digits, and underscores are allowed.',
+				},
+			],
 		};
 	}
 
 	if (!/^(true|false|null|'[^'\\]*'|"[^"\\]*"|-?\d+(\.\d+)?)$/i.test(constantValue)) {
 		return {
-			content: [{
-				type: 'text',
-				text: 'Error: Invalid constant value. Must be a PHP literal: true, false, null, a number, or a quoted string (e.g. \'my-value\').',
-			}],
+			content: [
+				{
+					type: 'text',
+					text: "Error: Invalid constant value. Must be a PHP literal: true, false, null, a number, or a quoted string (e.g. 'my-value').",
+				},
+			],
 		};
 	}
 
@@ -140,9 +147,7 @@ async function handleEditWpConfig(
 
 	let fileContent = await readFile(configPath, 'utf-8');
 
-	const regex = new RegExp(
-		`(define\\s*\\(\\s*['"]${escapeRegex(constantName)}['"]\\s*,\\s*)([^)]+?)(\\s*\\)\\s*;)`,
-	);
+	const regex = new RegExp(`(define\\s*\\(\\s*['"]${escapeRegex(constantName)}['"]\\s*,\\s*)([^)]+?)(\\s*\\)\\s*;)`);
 
 	if (regex.test(fileContent)) {
 		fileContent = fileContent.replace(regex, `$1${constantValue}$3`);
@@ -180,7 +185,7 @@ async function handleEditWpConfig(
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-function parseDefineConstants(content: string): Record<string, string> {
+export function parseDefineConstants(content: string): Record<string, string> {
 	const constants: Record<string, string> = {};
 	const regex = /define\s*\(\s*['"]([^'"]+)['"]\s*,\s*([^)]+?)\s*\)\s*;/g;
 	let match: RegExpExecArray | null;

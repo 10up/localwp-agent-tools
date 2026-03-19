@@ -1,38 +1,16 @@
 import { SiteConfig } from '../helpers/site-config';
-import {
-	toolDefinitions as wpcliTools,
-	handleTool as handleWpcliTool,
-} from './wpcli';
-import {
-	toolDefinitions as logTools,
-	handleTool as handleLogTool,
-} from './logs';
-import {
-	toolDefinitions as configTools,
-	handleTool as handleConfigTool,
-} from './config';
-import {
-	toolDefinitions as siteTools,
-	handleTool as handleSiteTool,
-} from './site';
-import {
-	toolDefinitions as environmentTools,
-	handleTool as handleEnvironmentTool,
-	LocalApi,
-} from './environment';
+import { toolDefinitions as wpcliTools, handleTool as handleWpcliTool } from './wpcli';
+import { toolDefinitions as logTools, handleTool as handleLogTool } from './logs';
+import { toolDefinitions as configTools, handleTool as handleConfigTool } from './config';
+import { toolDefinitions as siteTools, handleTool as handleSiteTool } from './site';
+import { toolDefinitions as environmentTools, handleTool as handleEnvironmentTool, LocalApi } from './environment';
 
 export type { LocalApi } from './environment';
 
 export type ToolResult = { content: Array<{ type: string; text: string }> };
 
 // All tool definitions aggregated
-export const allToolDefinitions = [
-	...wpcliTools,
-	...logTools,
-	...configTools,
-	...siteTools,
-	...environmentTools,
-];
+export const allToolDefinitions = [...wpcliTools, ...logTools, ...configTools, ...siteTools, ...environmentTools];
 
 // Unified handler type: (name, args, config, localApi) => ToolResult
 type ToolHandler = (
@@ -73,10 +51,12 @@ export async function handleToolCall(
 	const handler = toolHandlerMap[name];
 	if (!handler) {
 		return {
-			content: [{
-				type: 'text',
-				text: `Unknown tool: ${name}. Available tools: ${allToolDefinitions.map(t => t.name).join(', ')}`,
-			}],
+			content: [
+				{
+					type: 'text',
+					text: `Unknown tool: ${name}. Available tools: ${allToolDefinitions.map((t) => t.name).join(', ')}`,
+				},
+			],
 		};
 	}
 	return handler(name, args, config, localApi);

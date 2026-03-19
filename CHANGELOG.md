@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file, per [the Ke
 ## [Unreleased]
 
 ## [0.1.0] - 2026-03-11
+
 ### Added
+
 - Initial release of the Agent Tools add-on for Local.
 - Single HTTP MCP server running in Local's Electron main process.
 - Support for Claude Code, Cursor, Windsurf, and VS Code Copilot.
@@ -14,6 +16,7 @@ All notable changes to this project will be documented in this file, per [the Ke
 - Stable port allocation with file persistence.
 
 ### Fixed
+
 - Search all lightning-services directories for service binaries (props [@rickalee](https://github.com/rickalee) via [#3](https://github.com/10up/localwp-agent-tools/pull/3)).
 - Check `wp-content/debug.log` when reading PHP error logs with WP_DEBUG_LOG enabled (props [@iandunn](https://github.com/iandunn) via [#5](https://github.com/10up/localwp-agent-tools/issues/5)).
 

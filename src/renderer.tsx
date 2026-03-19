@@ -84,14 +84,16 @@ function AgentToolsPanel({ site, electron }: { site: SiteProps; electron: any })
 		}
 	}, [site.id, electron]);
 
-	useEffect(() => { fetchStatus(); }, [fetchStatus]);
+	useEffect(() => {
+		fetchStatus();
+	}, [fetchStatus]);
 
 	const isEnabled = status?.enabled || false;
 
 	const toggleAgent = (agent: AgentTarget) => {
-		setSelectedAgents(prev => {
+		setSelectedAgents((prev) => {
 			if (prev.includes(agent)) {
-				return prev.filter(a => a !== agent);
+				return prev.filter((a) => a !== agent);
 			}
 			return [...prev, agent];
 		});
@@ -148,7 +150,7 @@ function AgentToolsPanel({ site, electron }: { site: SiteProps; electron: any })
 			<>
 				<div style={{ marginBottom: 8 }}>
 					<p style={sectionHeadingStyle}>Coding Agents</p>
-					{AGENT_OPTIONS.map(opt => (
+					{AGENT_OPTIONS.map((opt) => (
 						<label key={opt.value} style={checkboxStyle}>
 							<input
 								type="checkbox"
@@ -159,9 +161,7 @@ function AgentToolsPanel({ site, electron }: { site: SiteProps; electron: any })
 						</label>
 					))}
 					{selectedAgents.length === 0 && (
-						<p style={{ ...helperTextStyle, color: '#f59e0b' }}>
-							Select at least one coding agent.
-						</p>
+						<p style={{ ...helperTextStyle, color: '#f59e0b' }}>Select at least one coding agent.</p>
 					)}
 				</div>
 
@@ -179,10 +179,7 @@ function AgentToolsPanel({ site, electron }: { site: SiteProps; electron: any })
 					</p>
 				</div>
 
-				<TextButton
-					style={{ paddingLeft: 0 }}
-					onClick={handleEnable}
-				>
+				<TextButton style={{ paddingLeft: 0 }} onClick={handleEnable}>
 					{busy ? 'Setting up...' : 'Enable'}
 				</TextButton>
 
@@ -196,7 +193,7 @@ function AgentToolsPanel({ site, electron }: { site: SiteProps; electron: any })
 	// ── Enabled ──────────────────────────────────────────────────────────
 
 	const agentsChanged = status?.agents
-		? (selectedAgents.length !== status.agents.length || selectedAgents.some(a => !status.agents.includes(a)))
+		? selectedAgents.length !== status.agents.length || selectedAgents.some((a) => !status.agents.includes(a))
 		: false;
 
 	const handleUpdateAgents = async () => {
@@ -216,10 +213,8 @@ function AgentToolsPanel({ site, electron }: { site: SiteProps; electron: any })
 			<p style={sectionHeadingStyle}>Settings</p>
 
 			<div style={{ marginBottom: 8 }}>
-				<label style={{ fontSize: 12, color: '#999', display: 'block', marginBottom: 3 }}>
-					Coding agents
-				</label>
-				{AGENT_OPTIONS.map(opt => (
+				<label style={{ fontSize: 12, color: '#999', display: 'block', marginBottom: 3 }}>Coding agents</label>
+				{AGENT_OPTIONS.map((opt) => (
 					<label key={opt.value} style={checkboxStyle}>
 						<input
 							type="checkbox"
@@ -230,17 +225,12 @@ function AgentToolsPanel({ site, electron }: { site: SiteProps; electron: any })
 					</label>
 				))}
 				{agentsChanged && selectedAgents.length > 0 && (
-					<TextButton
-						style={{ paddingLeft: 0, fontSize: 12, marginTop: 2 }}
-						onClick={handleUpdateAgents}
-					>
+					<TextButton style={{ paddingLeft: 0, fontSize: 12, marginTop: 2 }} onClick={handleUpdateAgents}>
 						{busy ? 'Updating...' : 'Update'}
 					</TextButton>
 				)}
 				{selectedAgents.length === 0 && (
-					<p style={{ ...helperTextStyle, color: '#f59e0b' }}>
-						Select at least one coding agent.
-					</p>
+					<p style={{ ...helperTextStyle, color: '#f59e0b' }}>Select at least one coding agent.</p>
 				)}
 			</div>
 
@@ -254,16 +244,11 @@ function AgentToolsPanel({ site, electron }: { site: SiteProps; electron: any })
 					/>
 				</div>
 				{projectDir !== (status?.projectDir || '') && (
-					<TextButton
-						style={{ paddingLeft: 0, fontSize: 12 }}
-						onClick={handleChangeDir}
-					>
+					<TextButton style={{ paddingLeft: 0, fontSize: 12 }} onClick={handleChangeDir}>
 						{busy ? 'Moving...' : 'Apply'}
 					</TextButton>
 				)}
-				<p style={helperTextStyle}>
-					Where MCP config and project context files are placed within the site.
-				</p>
+				<p style={helperTextStyle}>Where MCP config and project context files are placed within the site.</p>
 			</div>
 
 			{/* ── Next Steps ─────────────────────────────────── */}
@@ -271,9 +256,11 @@ function AgentToolsPanel({ site, electron }: { site: SiteProps; electron: any })
 			<p style={sectionHeadingStyle}>Next Steps</p>
 
 			<div style={{ marginBottom: 8 }}>
-				{(status?.agents || []).map(agent => (
+				{(status?.agents || []).map((agent) => (
 					<p key={agent} style={{ margin: '3px 0', fontSize: 11, color: '#aaa' }}>
-						<strong style={{ color: '#ccc' }}>{AGENT_OPTIONS.find(o => o.value === agent)?.label}:</strong>{' '}
+						<strong style={{ color: '#ccc' }}>
+							{AGENT_OPTIONS.find((o) => o.value === agent)?.label}:
+						</strong>{' '}
 						{AGENT_HINTS[agent]}
 					</p>
 				))}
@@ -283,25 +270,17 @@ function AgentToolsPanel({ site, electron }: { site: SiteProps; electron: any })
 			<Divider marginSize="s" />
 			<p style={sectionHeadingStyle}>Actions</p>
 
-			<TextButton
-				style={{ paddingLeft: 0 }}
-				onClick={handleRegenerate}
-			>
+			<TextButton style={{ paddingLeft: 0 }} onClick={handleRegenerate}>
 				Regenerate Config
 			</TextButton>
 			<p style={helperTextStyle}>
 				Re-generates MCP config and project context. Useful if the agent is having trouble using the tools.
 			</p>
 
-			<TextButton
-				style={{ paddingLeft: 0 }}
-				onClick={handleDisable}
-			>
+			<TextButton style={{ paddingLeft: 0 }} onClick={handleDisable}>
 				Disable
 			</TextButton>
-			<p style={helperTextStyle}>
-				Removes Agent Tools config files from this site.
-			</p>
+			<p style={helperTextStyle}>Removes Agent Tools config files from this site.</p>
 		</>
 	);
 }

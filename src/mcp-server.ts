@@ -1,6 +1,6 @@
 import * as http from 'http';
 import { randomUUID } from 'crypto';
-import { SiteConfig, SiteConfigRegistry } from './helpers/site-config';
+import { SiteConfigRegistry } from './helpers/site-config';
 import { allToolDefinitions, handleToolCall, LocalApi } from './tools';
 
 // ---------------------------------------------------------------------------
@@ -10,14 +10,9 @@ import { allToolDefinitions, handleToolCall, LocalApi } from './tools';
 // TypeScript's "node" moduleResolution which doesn't read exports maps.
 // ---------------------------------------------------------------------------
 
-/* eslint-disable @typescript-eslint/no-var-requires */
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
-const {
-	CallToolRequestSchema,
-	ListToolsRequestSchema,
-} = require('@modelcontextprotocol/sdk/types.js');
-/* eslint-enable @typescript-eslint/no-var-requires */
+const { CallToolRequestSchema, ListToolsRequestSchema } = require('@modelcontextprotocol/sdk/types.js');
 
 // ---------------------------------------------------------------------------
 // MCP SDK Type Aliases
@@ -65,8 +60,16 @@ function startSessionCleanup(): void {
 		for (const [sessionId, entry] of sessions) {
 			if (now - entry.lastActivity > SESSION_TIMEOUT_MS) {
 				console.log(`[Agent Tools] Closing inactive MCP session ${sessionId}`);
-				try { entry.transport.close(); } catch {}
-				try { entry.server.close(); } catch {}
+				try {
+					entry.transport.close();
+				} catch {
+					/* intentionally empty */
+				}
+				try {
+					entry.server.close();
+				} catch {
+					/* intentionally empty */
+				}
 				sessions.delete(sessionId);
 			}
 		}
@@ -88,8 +91,16 @@ export function closeSessionsForSite(siteId: string): void {
 	for (const [sessionId, entry] of sessions) {
 		if (entry.siteId === siteId) {
 			console.log(`[Agent Tools] Closing MCP session ${sessionId} for site ${siteId}`);
-			try { entry.transport.close(); } catch {}
-			try { entry.server.close(); } catch {}
+			try {
+				entry.transport.close();
+			} catch {
+				/* intentionally empty */
+			}
+			try {
+				entry.server.close();
+			} catch {
+				/* intentionally empty */
+			}
 			sessions.delete(sessionId);
 		}
 	}
@@ -97,8 +108,16 @@ export function closeSessionsForSite(siteId: string): void {
 
 function closeAllSessions(): void {
 	for (const [sessionId, entry] of sessions) {
-		try { entry.transport.close(); } catch {}
-		try { entry.server.close(); } catch {}
+		try {
+			entry.transport.close();
+		} catch {
+			/* intentionally empty */
+		}
+		try {
+			entry.server.close();
+		} catch {
+			/* intentionally empty */
+		}
 	}
 	sessions.clear();
 }
@@ -108,10 +127,7 @@ function closeAllSessions(): void {
 // ---------------------------------------------------------------------------
 
 function createMcpServer(siteId: string, registry: SiteConfigRegistry, localApi: LocalApi): McpServer {
-	const server = new Server(
-		{ name: 'local-wp', version: '1.0.0' },
-		{ capabilities: { tools: {} } },
-	);
+	const server = new Server({ name: 'local-wp', version: '1.0.0' }, { capabilities: { tools: {} } });
 
 	server.setRequestHandler(ListToolsRequestSchema, async () => {
 		return { tools: allToolDefinitions };
@@ -208,9 +224,11 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 		const config = registry.get(siteId);
 		if (!config) {
 			res.writeHead(404, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({
-				error: `Site not registered: ${siteId}. The site may not be running or Agent Tools may not be enabled.`,
-			}));
+			res.end(
+				JSON.stringify({
+					error: `Site not registered: ${siteId}. The site may not be running or Agent Tools may not be enabled.`,
+				}),
+			);
 			return;
 		}
 
@@ -224,7 +242,13 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 				} catch (err) {
 					if (!res.headersSent) {
 						res.writeHead(413, { 'Content-Type': 'application/json' });
-						res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'Request body too large' }, id: null }));
+						res.end(
+							JSON.stringify({
+								jsonrpc: '2.0',
+								error: { code: -32000, message: 'Request body too large' },
+								id: null,
+							}),
+						);
 					}
 					return;
 				}
@@ -233,7 +257,9 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 					body = JSON.parse(bodyStr);
 				} catch {
 					res.writeHead(400, { 'Content-Type': 'application/json' });
-					res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null }));
+					res.end(
+						JSON.stringify({ jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null }),
+					);
 					return;
 				}
 
@@ -246,16 +272,22 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 				}
 
 				// New session — must be an initialize request
-				const isInit = body?.method === 'initialize' ||
+				const isInit =
+					body?.method === 'initialize' ||
 					(Array.isArray(body) && body.some((msg: McpRequest) => msg?.method === 'initialize'));
 
 				if (!isInit) {
 					res.writeHead(400, { 'Content-Type': 'application/json' });
-					res.end(JSON.stringify({
-						jsonrpc: '2.0',
-						error: { code: -32000, message: 'Bad Request: No valid session and not an initialize request' },
-						id: body?.id ?? null,
-					}));
+					res.end(
+						JSON.stringify({
+							jsonrpc: '2.0',
+							error: {
+								code: -32000,
+								message: 'Bad Request: No valid session and not an initialize request',
+							},
+							id: body?.id ?? null,
+						}),
+					);
 					return;
 				}
 
@@ -285,7 +317,6 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 				const mcpServer = createMcpServer(siteId, registry, localApi);
 				await mcpServer.connect(transport);
 				await transport.handleRequest(req, res, body);
-
 			} else if (method === 'GET') {
 				// SSE stream for existing session
 				if (!sessionId || !sessions.has(sessionId)) {
@@ -296,7 +327,6 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 				const entry = sessions.get(sessionId)!;
 				entry.lastActivity = Date.now();
 				await entry.transport.handleRequest(req, res);
-
 			} else if (method === 'DELETE') {
 				// Session termination
 				if (!sessionId || !sessions.has(sessionId)) {
@@ -306,9 +336,12 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 				}
 				const entry = sessions.get(sessionId)!;
 				await entry.transport.handleRequest(req, res);
-				try { entry.server.close(); } catch {}
+				try {
+					entry.server.close();
+				} catch {
+					/* intentionally empty */
+				}
 				sessions.delete(sessionId);
-
 			} else {
 				res.writeHead(405, { 'Content-Type': 'application/json' });
 				res.end(JSON.stringify({ error: 'Method not allowed' }));

@@ -56,8 +56,7 @@ export const toolDefinitions = [
 	},
 	{
 		name: 'read_access_log',
-		description:
-			'Read the nginx access log for the Local site. Returns the last N lines (default 50).',
+		description: 'Read the nginx access log for the Local site. Returns the last N lines (default 50).',
 		inputSchema: {
 			type: 'object' as const,
 			properties: {
@@ -91,8 +90,7 @@ export const toolDefinitions = [
 				},
 				script_debug: {
 					type: 'boolean',
-					description:
-						'Enable SCRIPT_DEBUG (loads non-minified scripts). Defaults to same value as enable.',
+					description: 'Enable SCRIPT_DEBUG (loads non-minified scripts). Defaults to same value as enable.',
 				},
 			},
 			required: ['enable'],
@@ -161,7 +159,12 @@ async function handleReadErrorLog(
 	const logFile = await findErrorLog(config);
 	if (!logFile) {
 		return {
-			content: [{ type: 'text', text: `PHP error log not found. Searched:\n  ${path.join(config.logPath, 'php', 'error.log')}\n  ${path.join(config.wpPath, 'wp-content', 'debug.log')}` }],
+			content: [
+				{
+					type: 'text',
+					text: `PHP error log not found. Searched:\n  ${path.join(config.logPath, 'php', 'error.log')}\n  ${path.join(config.wpPath, 'wp-content', 'debug.log')}`,
+				},
+			],
 		};
 	}
 
@@ -217,9 +220,7 @@ async function handleReadAccessLog(
 
 	if (!logFile) {
 		return {
-			content: [
-				{ type: 'text', text: `Access log not found. Searched:\n${candidates.join('\n')}` },
-			],
+			content: [{ type: 'text', text: `Access log not found. Searched:\n${candidates.join('\n')}` }],
 		};
 	}
 
@@ -298,11 +299,8 @@ async function handleWpDebugToggle(
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-function setWpConstant(content: string, name: string, value: string): string {
-	const regex = new RegExp(
-		`(define\\s*\\(\\s*['"]${name}['"]\\s*,\\s*)([^)]+?)(\\s*\\)\\s*;)`,
-		'g',
-	);
+export function setWpConstant(content: string, name: string, value: string): string {
+	const regex = new RegExp(`(define\\s*\\(\\s*['"]${name}['"]\\s*,\\s*)([^)]+?)(\\s*\\)\\s*;)`, 'g');
 
 	if (regex.test(content)) {
 		return content.replace(regex, `$1${value}$3`);
@@ -323,7 +321,14 @@ function setWpConstant(content: string, name: string, value: string): string {
 	return content + `\n${insertLine}`;
 }
 
-function parsePhpErrorLine(line: string): { raw: string; timestamp?: string; level?: string; message?: string; file?: string; line?: number } {
+export function parsePhpErrorLine(line: string): {
+	raw: string;
+	timestamp?: string;
+	level?: string;
+	message?: string;
+	file?: string;
+	line?: number;
+} {
 	const match = line.match(
 		/^\[([^\]]+)\]\s+(?:PHP\s+)?(Fatal error|Warning|Notice|Deprecated|Parse error|Strict Standards|Recoverable fatal error)?:?\s*(.*?)(?:\s+in\s+(\S+?)(?:\s+on\s+line\s+(\d+))?)?$/i,
 	);

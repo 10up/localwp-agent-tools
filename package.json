@@ -16,14 +16,32 @@
 	"scripts": {
 		"build": "tsc -p tsconfig.json",
 		"watch": "tsc -p tsconfig.json --watch",
-		"prepare": "npm run build"
+		"prepare": "npm run build",
+		"typecheck": "tsc --noEmit",
+		"lint": "eslint src/ tests/",
+		"lint:fix": "eslint src/ tests/ --fix",
+		"format": "prettier --write .",
+		"format:check": "prettier --check .",
+		"test": "vitest run",
+		"test:unit": "vitest run --exclude='tests/**/*.integration.test.ts'",
+		"test:integration": "vitest run tests/**/*.integration.test.ts",
+		"test:watch": "vitest",
+		"test:coverage": "vitest run --coverage",
+		"ci": "npm run lint && npm run format:check && npm run typecheck && npm run test:coverage && npm run build"
 	},
 	"devDependencies": {
+		"@eslint/js": "^10.0.1",
 		"@getflywheel/local": "^9",
 		"@types/fs-extra": "^11.0.4",
 		"@types/node": "^20.0.0",
 		"@types/react": "^18.2.0",
-		"typescript": "^5.3.0"
+		"@vitest/coverage-v8": "^4.1.0",
+		"eslint": "^10.0.3",
+		"eslint-config-prettier": "^10.1.8",
+		"prettier": "^3.8.1",
+		"typescript": "^5.3.0",
+		"typescript-eslint": "^8.57.1",
+		"vitest": "^4.1.0"
 	},
 	"dependencies": {
 		"@getflywheel/local-components": "^17.6.2",
