@@ -153,9 +153,22 @@ function splitArgs(str: string): string[] {
 	let current = '';
 	let inSingle = false;
 	let inDouble = false;
+	let escaped = false;
 
 	for (let i = 0; i < str.length; i++) {
 		const ch = str[i];
+
+		if (escaped) {
+			current += ch;
+			escaped = false;
+			continue;
+		}
+
+		// Backslash escapes the next character (except inside single quotes)
+		if (ch === '\\' && !inSingle) {
+			escaped = true;
+			continue;
+		}
 
 		if (ch === "'" && !inDouble) {
 			inSingle = !inSingle;
