@@ -52,12 +52,5 @@
 	],
 	"engines": {
 		"local-by-flywheel": "^9.0.0"
-	},
-	"bundleDependencies": [
-		"@getflywheel/local-components",
-		"@modelcontextprotocol/sdk",
-		"fs-extra",
-		"lodash",
-		"zod"
-	]
+	}
 }
