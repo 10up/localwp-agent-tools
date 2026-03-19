@@ -1,7 +1,37 @@
-import { readFile, writeFile, copyFile, stat } from 'fs/promises';
+import { readFile, writeFile, copyFile, stat, open } from 'fs/promises';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import { SiteConfig } from '../helpers/site-config';
+
+const MAX_LOG_READ_SIZE = 5 * 1024 * 1024; // 5 MB
+
+/**
+ * Read the tail of a log file efficiently.
+ * For files larger than MAX_LOG_READ_SIZE, only the last 5 MB is read
+ * to avoid loading huge log files entirely into memory.
+ */
+async function readLogTail(filePath: string): Promise<string> {
+	const fileStat = await stat(filePath);
+
+	if (fileStat.size <= MAX_LOG_READ_SIZE) {
+		return readFile(filePath, 'utf-8');
+	}
+
+	// Read only the last MAX_LOG_READ_SIZE bytes
+	const fd = await open(filePath, 'r');
+	try {
+		const offset = fileStat.size - MAX_LOG_READ_SIZE;
+		const buffer = Buffer.alloc(MAX_LOG_READ_SIZE);
+		await fd.read(buffer, 0, MAX_LOG_READ_SIZE, offset);
+		const content = buffer.toString('utf-8');
+
+		// Skip the first partial line (we likely landed mid-line)
+		const firstNewline = content.indexOf('\n');
+		return firstNewline >= 0 ? content.slice(firstNewline + 1) : content;
+	} finally {
+		await fd.close();
+	}
+}
 
 // ── Tool Definitions ───────────────────────────────────────────────────
 export const toolDefinitions = [
@@ -135,7 +165,7 @@ async function handleReadErrorLog(
 		};
 	}
 
-	const content = await readFile(logFile, 'utf-8');
+	const content = await readLogTail(logFile);
 	let lines = content.split('\n').filter((l) => l.trim());
 
 	if (filter) {
@@ -193,7 +223,7 @@ async function handleReadAccessLog(
 		};
 	}
 
-	const content = await readFile(logFile, 'utf-8');
+	const content = await readLogTail(logFile);
 	let lines = content.split('\n').filter((l) => l.trim());
 
 	if (filter) {
