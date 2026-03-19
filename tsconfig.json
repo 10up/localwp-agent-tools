@@ -9,7 +9,7 @@
 		"lib": ["es2017", "esnext.asynciterable", "dom"],
 		"module": "commonjs",
 		"noImplicitReturns": true,
-		"noImplicitAny": false,
+		"noImplicitAny": true,
 		"outDir": "./lib",
 		"resolveJsonModule": true,
 		"rootDir": "./src",
