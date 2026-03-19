@@ -49,7 +49,7 @@ async function runWpCli(
 	// can find `mysqlcheck`, `mysqldump`, etc.
 	const mysqlBinDir = config.mysqlBin ? path.dirname(config.mysqlBin) : '';
 	const envPath = mysqlBinDir
-		? `${mysqlBinDir}:${process.env.PATH || ''}`
+		? `${mysqlBinDir}${path.delimiter}${process.env.PATH || ''}`
 		: process.env.PATH || '';
 
 	const env: NodeJS.ProcessEnv = {
