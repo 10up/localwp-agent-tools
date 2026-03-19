@@ -472,7 +472,7 @@ async function teardownSite(site: Local.Site, notifier: any): Promise<void> {
 		await removeContextFile(path.join(projectPath, agentConfig.contextFilePath), agent);
 	}
 
-	// 3. Clean up .gitignore
+	// 4. Clean up .gitignore
 	await updateGitignore(projectPath, []);
 
 	// 5. Unmark site
