@@ -100,14 +100,10 @@ async function handleGetSiteInfo(config: SiteConfig): Promise<{
 	if (existsSync(configPath)) {
 		try {
 			const configContent = await readFile(configPath, 'utf-8');
-			const debugMatch = configContent.match(
-				/define\s*\(\s*['"]WP_DEBUG['"]\s*,\s*([^)]+?)\s*\)/,
-			);
+			const debugMatch = configContent.match(/define\s*\(\s*['"]WP_DEBUG['"]\s*,\s*([^)]+?)\s*\)/);
 			info.wpDebug = debugMatch ? debugMatch[1].trim() : 'not set';
 
-			const prefixMatch = configContent.match(
-				/\$table_prefix\s*=\s*['"]([^'"]+)['"]/,
-			);
+			const prefixMatch = configContent.match(/\$table_prefix\s*=\s*['"]([^'"]+)['"]/);
 			info.tablePrefix = prefixMatch ? prefixMatch[1] : 'wp_';
 		} catch {
 			// non-critical
@@ -168,16 +164,40 @@ async function handleSiteHealthCheck(config: SiteConfig): Promise<{
 				wpCliArgs.push('-d', `mysqli.default_socket=${config.dbSocket}`);
 				wpCliArgs.push('-d', `pdo_mysql.default_socket=${config.dbSocket}`);
 			}
-			wpCliArgs.push(config.wpCliBin, 'db', 'check', `--path=${config.wpPath}`, '--skip-themes', '--skip-plugins');
-			await execFileAsync(config.phpBin, wpCliArgs, { cwd: config.wpPath, timeout: 15_000, env: buildWpCliEnv(config) });
+			wpCliArgs.push(
+				config.wpCliBin,
+				'db',
+				'check',
+				`--path=${config.wpPath}`,
+				'--skip-themes',
+				'--skip-plugins',
+			);
+			await execFileAsync(config.phpBin, wpCliArgs, {
+				cwd: config.wpPath,
+				timeout: 15_000,
+				env: buildWpCliEnv(config),
+			});
 
 			const countArgs: string[] = [];
 			if (config.dbSocket) {
 				countArgs.push('-d', `mysqli.default_socket=${config.dbSocket}`);
 				countArgs.push('-d', `pdo_mysql.default_socket=${config.dbSocket}`);
 			}
-			countArgs.push(config.wpCliBin, 'db', 'query', 'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()', '--skip-column-names', `--path=${config.wpPath}`, '--skip-themes', '--skip-plugins');
-			const { stdout: countOut } = await execFileAsync(config.phpBin, countArgs, { cwd: config.wpPath, timeout: 15_000, env: buildWpCliEnv(config) });
+			countArgs.push(
+				config.wpCliBin,
+				'db',
+				'query',
+				'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()',
+				'--skip-column-names',
+				`--path=${config.wpPath}`,
+				'--skip-themes',
+				'--skip-plugins',
+			);
+			const { stdout: countOut } = await execFileAsync(config.phpBin, countArgs, {
+				cwd: config.wpPath,
+				timeout: 15_000,
+				env: buildWpCliEnv(config),
+			});
 			const tableCount = parseInt(countOut.trim(), 10) || 0;
 
 			checks.push({
@@ -240,9 +260,7 @@ async function handleSiteHealthCheck(config: SiteConfig): Promise<{
 	if (existsSync(wpConfigPath)) {
 		try {
 			const configContent = await readFile(wpConfigPath, 'utf-8');
-			const debugMatch = configContent.match(
-				/define\s*\(\s*['"]WP_DEBUG['"]\s*,\s*([^)]+?)\s*\)/,
-			);
+			const debugMatch = configContent.match(/define\s*\(\s*['"]WP_DEBUG['"]\s*,\s*([^)]+?)\s*\)/);
 			const debugValue = debugMatch ? debugMatch[1].trim() : 'not defined';
 			const isEnabled = /true/i.test(debugValue);
 
@@ -346,11 +364,12 @@ async function handleSiteHealthCheck(config: SiteConfig): Promise<{
 
 	const errors = checks.filter((c) => c.status === 'error').length;
 	const warnings = checks.filter((c) => c.status === 'warning').length;
-	const summary = errors > 0
-		? `${errors} error(s), ${warnings} warning(s)`
-		: warnings > 0
-			? `${warnings} warning(s), no errors`
-			: 'All checks passed';
+	const summary =
+		errors > 0
+			? `${errors} error(s), ${warnings} warning(s)`
+			: warnings > 0
+				? `${warnings} warning(s), no errors`
+				: 'All checks passed';
 
 	return {
 		content: [{ type: 'text', text: JSON.stringify({ summary, checks }, null, 2) }],

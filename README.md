@@ -27,30 +27,30 @@ Sites remain registered even when stopped, so the MCP endpoint is always reachab
 
 ## Supported Agents
 
-| Agent | MCP Config | Context File |
-|-------|-----------|--------------|
-| Claude Code | `.mcp.json` | `CLAUDE.md` |
-| Cursor | `.cursor/mcp.json` | `.cursorrules` |
-| Windsurf | `.windsurf/mcp.json` | `.windsurfrules` |
-| VS Code Copilot | `.vscode/mcp.json` | `.github/copilot-instructions.md` |
+| Agent           | MCP Config           | Context File                      |
+| --------------- | -------------------- | --------------------------------- |
+| Claude Code     | `.mcp.json`          | `CLAUDE.md`                       |
+| Cursor          | `.cursor/mcp.json`   | `.cursorrules`                    |
+| Windsurf        | `.windsurf/mcp.json` | `.windsurfrules`                  |
+| VS Code Copilot | `.vscode/mcp.json`   | `.github/copilot-instructions.md` |
 
 ## MCP Tools (12 total)
 
-| Category | Tools | Description |
-|----------|-------|-------------|
-| **WP-CLI** | `wp_cli` | Run any WP-CLI command (database queries, imports, exports, search-replace, plugin/theme management, etc.) |
-| **Logs** | `read_error_log` | Read and parse the PHP error log |
-| | `read_access_log` | Read the nginx access log |
-| | `wp_debug_toggle` | Enable/disable WP_DEBUG, WP_DEBUG_LOG, and SCRIPT_DEBUG |
-| **Config** | `read_wp_config` | Parse wp-config.php constants and table prefix |
-| | `edit_wp_config` | Add or modify a wp-config.php constant (with backup) |
-| **Site** | `get_site_info` | Paths, URLs, database config, PHP/WP versions, active plugins and theme |
-| | `site_health_check` | Database connectivity, file permissions, WP_DEBUG status, log sizes, PHP version |
-| **Environment** | `site_start` | Start a site's services (PHP, MySQL, web server) |
-| | `site_stop` | Stop a site's services |
-| | `site_restart` | Restart a site's services |
-| | `site_status` | Get current status of a site |
-| | `list_sites` | List all Local sites with status |
+| Category        | Tools               | Description                                                                                                |
+| --------------- | ------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **WP-CLI**      | `wp_cli`            | Run any WP-CLI command (database queries, imports, exports, search-replace, plugin/theme management, etc.) |
+| **Logs**        | `read_error_log`    | Read and parse the PHP error log                                                                           |
+|                 | `read_access_log`   | Read the nginx access log                                                                                  |
+|                 | `wp_debug_toggle`   | Enable/disable WP_DEBUG, WP_DEBUG_LOG, and SCRIPT_DEBUG                                                    |
+| **Config**      | `read_wp_config`    | Parse wp-config.php constants and table prefix                                                             |
+|                 | `edit_wp_config`    | Add or modify a wp-config.php constant (with backup)                                                       |
+| **Site**        | `get_site_info`     | Paths, URLs, database config, PHP/WP versions, active plugins and theme                                    |
+|                 | `site_health_check` | Database connectivity, file permissions, WP_DEBUG status, log sizes, PHP version                           |
+| **Environment** | `site_start`        | Start a site's services (PHP, MySQL, web server)                                                           |
+|                 | `site_stop`         | Stop a site's services                                                                                     |
+|                 | `site_restart`      | Restart a site's services                                                                                  |
+|                 | `site_status`       | Get current status of a site                                                                               |
+|                 | `list_sites`        | List all Local sites with status                                                                           |
 
 ## Installation
 

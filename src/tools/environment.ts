@@ -16,7 +16,7 @@ export const toolDefinitions = [
 	{
 		name: 'site_start',
 		description:
-			'Start a Local site\'s services (PHP, MySQL, web server). ' +
+			"Start a Local site's services (PHP, MySQL, web server). " +
 			'If siteId is omitted, operates on the current site.',
 		inputSchema: {
 			type: 'object' as const,
@@ -31,7 +31,7 @@ export const toolDefinitions = [
 	{
 		name: 'site_stop',
 		description:
-			'Stop a Local site\'s services (PHP, MySQL, web server). ' +
+			"Stop a Local site's services (PHP, MySQL, web server). " +
 			'If siteId is omitted, operates on the current site.',
 		inputSchema: {
 			type: 'object' as const,
@@ -46,7 +46,7 @@ export const toolDefinitions = [
 	{
 		name: 'site_restart',
 		description:
-			'Restart a Local site\'s services (PHP, MySQL, web server). ' +
+			"Restart a Local site's services (PHP, MySQL, web server). " +
 			'If siteId is omitted, operates on the current site.',
 		inputSchema: {
 			type: 'object' as const,
@@ -75,8 +75,7 @@ export const toolDefinitions = [
 	},
 	{
 		name: 'list_sites',
-		description:
-			'List all Local sites with their ID, name, domain, path, and current status.',
+		description: 'List all Local sites with their ID, name, domain, path, and current status.',
 		inputSchema: {
 			type: 'object' as const,
 			properties: {},
@@ -123,11 +122,14 @@ async function handleSiteAction(
 
 	if (!siteId) {
 		return {
-			content: [{
-				type: 'text',
-				text: 'Error: No siteId provided and current site ID is not available. ' +
-					'Please provide a siteId argument, or use list_sites to find available site IDs.',
-			}],
+			content: [
+				{
+					type: 'text',
+					text:
+						'Error: No siteId provided and current site ID is not available. ' +
+						'Please provide a siteId argument, or use list_sites to find available site IDs.',
+				},
+			],
 		};
 	}
 
@@ -160,9 +162,7 @@ async function handleSiteAction(
 }
 
 // ── list_sites ────────────────────────────────────────────────────────
-async function handleListSites(
-	localApi: LocalApi,
-): Promise<{ content: Array<{ type: string; text: string }> }> {
+async function handleListSites(localApi: LocalApi): Promise<{ content: Array<{ type: string; text: string }> }> {
 	try {
 		const sites = await localApi.listSites();
 		return {

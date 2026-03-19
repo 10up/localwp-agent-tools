@@ -1,6 +1,5 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { existsSync } from 'fs';
 import { SiteConfig } from '../helpers/site-config';
 import { buildWpCliEnv } from '../helpers/utils';
 
@@ -22,7 +21,7 @@ const BLOCKED_COMMANDS: string[][] = [
 	['site', 'delete'],
 ];
 
-function isBlockedCommand(args: string[]): string | null {
+export function isBlockedCommand(args: string[]): string | null {
 	for (const blocked of BLOCKED_COMMANDS) {
 		if (blocked.every((part, i) => args[i]?.toLowerCase() === part)) {
 			return blocked.join(' ');
@@ -40,10 +39,10 @@ async function runWpCli(
 	if (!config.wpCliBin) {
 		throw new Error(
 			'WP-CLI is not installed or not found. To install:\n' +
-			'  curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar\n' +
-			'  chmod +x wp-cli.phar\n' +
-			'  sudo mv wp-cli.phar /usr/local/bin/wp\n\n' +
-			'Or set the WP_CLI_BIN environment variable to the path of your wp-cli binary.',
+				'  curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar\n' +
+				'  chmod +x wp-cli.phar\n' +
+				'  sudo mv wp-cli.phar /usr/local/bin/wp\n\n' +
+				'Or set the WP_CLI_BIN environment variable to the path of your wp-cli binary.',
 		);
 	}
 
@@ -141,10 +140,12 @@ async function handleWpCli(
 	const blockedCmd = isBlockedCommand(wpArgs);
 	if (blockedCmd) {
 		return {
-			content: [{
-				type: 'text',
-				text: `Error: "wp ${blockedCmd}" is blocked for safety. This command is destructive and must be run manually in a terminal.`,
-			}],
+			content: [
+				{
+					type: 'text',
+					text: `Error: "wp ${blockedCmd}" is blocked for safety. This command is destructive and must be run manually in a terminal.`,
+				},
+			],
 		};
 	}
 
@@ -159,7 +160,7 @@ async function handleWpCli(
 }
 
 // ── Utility: split command-line string into args array ─────────────────
-function splitArgs(str: string): string[] {
+export function splitArgs(str: string): string[] {
 	const args: string[] = [];
 	let current = '';
 	let inSingle = false;

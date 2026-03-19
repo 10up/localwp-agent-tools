@@ -31,7 +31,7 @@ export async function findAvailablePort(preferred?: number, maxAttempts = 10): P
 		// No saved port file
 	}
 
-	if (savedPort && await tryPort(savedPort)) {
+	if (savedPort && (await tryPort(savedPort))) {
 		return savedPort;
 	}
 

@@ -65,14 +65,10 @@ export function getRunPath(siteId: string): string {
  */
 function getBinaryPlatformDirCandidates(): string[] {
 	if (process.platform === 'darwin') {
-		return process.arch === 'arm64'
-			? ['darwin-arm64', 'darwin']
-			: ['darwin-x64', 'darwin'];
+		return process.arch === 'arm64' ? ['darwin-arm64', 'darwin'] : ['darwin-x64', 'darwin'];
 	}
 	if (process.platform === 'win32') {
-		return process.arch === 'x64'
-			? ['win64', 'win32']
-			: ['win32'];
+		return process.arch === 'x64' ? ['win64', 'win32'] : ['win32'];
 	}
 	return ['linux'];
 }
@@ -117,9 +113,7 @@ async function findServiceDir(serviceName: string, version: string): Promise<str
 	for (const lightningDir of dirsToCheck) {
 		try {
 			const entries = await fs.readdir(lightningDir);
-			const match = entries.find(entry =>
-				entry === prefix || entry.startsWith(prefix + '+')
-			);
+			const match = entries.find((entry) => entry === prefix || entry.startsWith(prefix + '+'));
 			if (match) {
 				return path.join(lightningDir, match);
 			}
@@ -137,7 +131,7 @@ async function findServiceDir(serviceName: string, version: string): Promise<str
 		try {
 			const entries = await fs.readdir(lightningDir);
 			const fuzzyMatch = entries
-				.filter(entry => entry.startsWith(fuzzyPrefix))
+				.filter((entry) => entry.startsWith(fuzzyPrefix))
 				.sort()
 				.pop(); // Take the latest version
 			if (fuzzyMatch) {
@@ -367,9 +361,7 @@ function getLocalAppResourcesCandidates(): string[] {
 
 	switch (process.platform) {
 		case 'darwin':
-			return [
-				'/Applications/Local.app/Contents/Resources/extraResources',
-			];
+			return ['/Applications/Local.app/Contents/Resources/extraResources'];
 		case 'win32': {
 			const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
 			return [

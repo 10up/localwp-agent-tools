@@ -2,13 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs-extra';
 import * as Local from '@getflywheel/local';
 import * as LocalMain from '@getflywheel/local/main';
-import {
-	resolveSitePath,
-	findPhpBinary,
-	findMysqlBinary,
-	findMysqlSocket,
-	findWpCli,
-} from './helpers/paths';
+import { resolveSitePath, findPhpBinary, findMysqlBinary, findMysqlSocket, findWpCli } from './helpers/paths';
 import { SiteConfig, SiteConfigRegistry } from './helpers/site-config';
 import { findAvailablePort, savePort, removePortFile, removePortFileSync } from './helpers/port';
 import { createMcpHttpServer, startMcpHttpServer, stopMcpHttpServer, closeSessionsForSite } from './mcp-server';
@@ -118,7 +112,6 @@ function getStoredAgents(site: Local.Site): AgentTarget[] {
 	return [];
 }
 
-
 function isAgentToolsEnabled(site: Local.Site): boolean {
 	return !!site.customOptions?.agentToolsEnabled;
 }
@@ -203,7 +196,11 @@ function buildMcpServerEntry(agent: AgentTarget, port: number, siteId: string): 
  * Creates the file (and parent directories) if it doesn't exist.
  * Preserves all other entries in the file.
  */
-async function mergeMcpConfig(configPath: string, serverEntry: Record<string, any>, topLevelKey: string): Promise<void> {
+async function mergeMcpConfig(
+	configPath: string,
+	serverEntry: Record<string, any>,
+	topLevelKey: string,
+): Promise<void> {
 	let existing: any = {};
 
 	if (await fs.pathExists(configPath)) {
@@ -233,7 +230,7 @@ async function mergeMcpConfig(configPath: string, serverEntry: Record<string, an
  * Handles both mcpServers and servers top-level keys.
  */
 async function removeMcpConfigEntry(configPath: string, topLevelKey: string): Promise<void> {
-	if (!await fs.pathExists(configPath)) return;
+	if (!(await fs.pathExists(configPath))) return;
 
 	try {
 		const existing = await fs.readJSON(configPath);
@@ -241,7 +238,7 @@ async function removeMcpConfigEntry(configPath: string, topLevelKey: string): Pr
 			delete existing[topLevelKey][MCP_SERVER_KEY];
 
 			if (Object.keys(existing[topLevelKey]).length === 0) {
-				const otherKeys = Object.keys(existing).filter(k => k !== topLevelKey);
+				const otherKeys = Object.keys(existing).filter((k) => k !== topLevelKey);
 				if (otherKeys.length === 0) {
 					await fs.remove(configPath);
 					await removeEmptyParentDirs(configPath);
@@ -271,7 +268,9 @@ async function removeEmptyParentDirs(filePath: string): Promise<void> {
 		if (contents.length === 0) {
 			await fs.remove(dir);
 		}
-	} catch {}
+	} catch {
+		/* intentionally empty */
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -309,7 +308,7 @@ async function writeContextFile(filePath: string, content: string, _agent: Agent
 
 		const markerRegex = new RegExp(
 			`${escapeRegex(CONTEXT_MARKER_START)}[\\s\\S]*?${escapeRegex(CONTEXT_MARKER_END)}`,
-			'g'
+			'g',
 		);
 
 		if (markerRegex.test(existing)) {
@@ -325,13 +324,13 @@ async function writeContextFile(filePath: string, content: string, _agent: Agent
 }
 
 async function removeContextFile(filePath: string, _agent: AgentTarget): Promise<void> {
-	if (!await fs.pathExists(filePath)) return;
+	if (!(await fs.pathExists(filePath))) return;
 
 	let content = await fs.readFile(filePath, 'utf-8');
 
 	const markerRegex = new RegExp(
 		`\\n?${escapeRegex(CONTEXT_MARKER_START)}[\\s\\S]*?${escapeRegex(CONTEXT_MARKER_END)}\\n?`,
-		'g'
+		'g',
 	);
 
 	content = content.replace(markerRegex, '');
@@ -373,20 +372,14 @@ async function updateGitignore(dirPath: string, agents: AgentTarget[]): Promise<
 	// Remove existing marked block
 	const markerRegex = new RegExp(
 		`\\n?${escapeRegex(GITIGNORE_MARKER_START)}[\\s\\S]*?${escapeRegex(GITIGNORE_MARKER_END)}\\n?`,
-		'g'
+		'g',
 	);
 	content = content.replace(markerRegex, '');
 
 	if (agents.length > 0) {
 		const entries = buildGitignoreEntries(agents);
 		if (entries.length > 0) {
-			const block = [
-				'',
-				GITIGNORE_MARKER_START,
-				...entries,
-				GITIGNORE_MARKER_END,
-				'',
-			].join('\n');
+			const block = ['', GITIGNORE_MARKER_START, ...entries, GITIGNORE_MARKER_END, ''].join('\n');
 
 			content = content.trimEnd() + '\n' + block;
 		}
@@ -443,7 +436,7 @@ async function setupSite(site: Local.Site, notifier: any, projectDir: string, ag
 		},
 	});
 
-	const agentLabels = agents.map(a => AGENT_TARGETS[a].label).join(', ');
+	const agentLabels = agents.map((a) => AGENT_TARGETS[a].label).join(', ');
 	notifier.notify({
 		title: 'Agent Tools',
 		message: `Agent Tools enabled for "${site.name}" (${agentLabels}).`,
@@ -515,7 +508,11 @@ async function changeProjectDir(site: Local.Site, newProjectDir: string, notifie
 		const agentConfig = AGENT_TARGETS[agent];
 
 		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
-		await mergeMcpConfig(path.join(newPath, agentConfig.mcpConfigPath), serverEntry, agentConfig.mcpConfigTopLevelKey);
+		await mergeMcpConfig(
+			path.join(newPath, agentConfig.mcpConfigPath),
+			serverEntry,
+			agentConfig.mcpConfigTopLevelKey,
+		);
 		await writeContextFile(path.join(newPath, agentConfig.contextFilePath), contextContent, agent);
 	}
 
@@ -543,8 +540,8 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 	const projectPath = getProjectPath(sitePath, projectDir);
 	const oldAgents = getStoredAgents(site);
 
-	const added = newAgents.filter(a => !oldAgents.includes(a));
-	const removed = oldAgents.filter(a => !newAgents.includes(a));
+	const added = newAgents.filter((a) => !oldAgents.includes(a));
+	const removed = oldAgents.filter((a) => !newAgents.includes(a));
 
 	// Remove configs for deselected agents
 	for (const agent of removed) {
@@ -562,7 +559,11 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 			const agentConfig = AGENT_TARGETS[agent];
 
 			const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
-			await mergeMcpConfig(path.join(projectPath, agentConfig.mcpConfigPath), serverEntry, agentConfig.mcpConfigTopLevelKey);
+			await mergeMcpConfig(
+				path.join(projectPath, agentConfig.mcpConfigPath),
+				serverEntry,
+				agentConfig.mcpConfigTopLevelKey,
+			);
 			await writeContextFile(path.join(projectPath, agentConfig.contextFilePath), contextContent, agent);
 		}
 	}
@@ -577,7 +578,7 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 		},
 	});
 
-	const agentLabels = newAgents.map(a => AGENT_TARGETS[a].label).join(', ');
+	const agentLabels = newAgents.map((a) => AGENT_TARGETS[a].label).join(', ');
 	notifier.notify({
 		title: 'Agent Tools',
 		message: `Updated agents for "${site.name}" (${agentLabels}).`,
@@ -603,7 +604,11 @@ async function regenerateConfig(site: Local.Site): Promise<void> {
 		const agentConfig = AGENT_TARGETS[agent];
 
 		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
-		await mergeMcpConfig(path.join(projectPath, agentConfig.mcpConfigPath), serverEntry, agentConfig.mcpConfigTopLevelKey);
+		await mergeMcpConfig(
+			path.join(projectPath, agentConfig.mcpConfigPath),
+			serverEntry,
+			agentConfig.mcpConfigTopLevelKey,
+		);
 		await writeContextFile(path.join(projectPath, agentConfig.contextFilePath), contextContent, agent);
 	}
 }
@@ -794,22 +799,25 @@ export default function (context: LocalMain.AddonMainContext): void {
 
 	// ── IPC Handlers ────────────────────────────────────────────────────
 
-	electron.ipcMain.handle('agent-tools:enable-site', async (_event: any, siteId: string, projectDir: string, agents: AgentTarget[]) => {
-		try {
-			const site = LocalMain.SiteData.getSite(siteId);
-			await setupSite(site, notifier, projectDir || '', agents);
-			return { success: true };
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			console.error('[Agent Tools] Enable failed:', message);
-			notifier.notify({
-				title: 'Agent Tools — Error',
-				message: `Failed to enable Agent Tools: ${message}`,
-				open: undefined,
-			});
-			return { success: false, error: message };
-		}
-	});
+	electron.ipcMain.handle(
+		'agent-tools:enable-site',
+		async (_event: any, siteId: string, projectDir: string, agents: AgentTarget[]) => {
+			try {
+				const site = LocalMain.SiteData.getSite(siteId);
+				await setupSite(site, notifier, projectDir || '', agents);
+				return { success: true };
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				console.error('[Agent Tools] Enable failed:', message);
+				notifier.notify({
+					title: 'Agent Tools — Error',
+					message: `Failed to enable Agent Tools: ${message}`,
+					open: undefined,
+				});
+				return { success: false, error: message };
+			}
+		},
+	);
 
 	electron.ipcMain.handle('agent-tools:disable-site', async (_event: any, siteId: string) => {
 		try {
@@ -863,17 +871,20 @@ export default function (context: LocalMain.AddonMainContext): void {
 		}
 	});
 
-	electron.ipcMain.handle('agent-tools:change-project-dir', async (_event: any, siteId: string, newProjectDir: string) => {
-		try {
-			const site = LocalMain.SiteData.getSite(siteId);
-			await changeProjectDir(site, newProjectDir || '', notifier);
-			return { success: true };
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			console.error('[Agent Tools] Change project dir failed:', message);
-			return { success: false, error: message };
-		}
-	});
+	electron.ipcMain.handle(
+		'agent-tools:change-project-dir',
+		async (_event: any, siteId: string, newProjectDir: string) => {
+			try {
+				const site = LocalMain.SiteData.getSite(siteId);
+				await changeProjectDir(site, newProjectDir || '', notifier);
+				return { success: true };
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				console.error('[Agent Tools] Change project dir failed:', message);
+				return { success: false, error: message };
+			}
+		},
+	);
 
 	// ── Hooks ───────────────────────────────────────────────────────────
 

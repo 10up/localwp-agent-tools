@@ -1,0 +1,246 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Tool definitions snapshot > matches the expected tool API surface 1`] = `
+[
+  {
+    "inputSchema": {
+      "properties": {
+        "args": {
+          "description": "WP-CLI arguments (without "wp" prefix). Example: "post list --post_type=page --format=json"",
+          "type": "string",
+        },
+      },
+      "required": [
+        "args",
+      ],
+      "type": "object",
+    },
+    "name": "wp_cli",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "filter": {
+          "description": "Optional string to filter log lines (case-insensitive).",
+          "type": "string",
+        },
+        "lines": {
+          "default": 50,
+          "description": "Number of lines to return from the end of the log. Default 50.",
+          "type": "number",
+        },
+      },
+      "type": "object",
+    },
+    "name": "read_error_log",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "filter": {
+          "description": "Optional string to filter log lines (case-insensitive).",
+          "type": "string",
+        },
+        "lines": {
+          "default": 50,
+          "description": "Number of lines to return from the end of the log. Default 50.",
+          "type": "number",
+        },
+      },
+      "type": "object",
+    },
+    "name": "read_access_log",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "debug_log": {
+          "description": "Enable WP_DEBUG_LOG (writes errors to wp-content/debug.log). Defaults to same value as enable.",
+          "type": "boolean",
+        },
+        "enable": {
+          "description": "Set to true to enable debug mode, false to disable.",
+          "type": "boolean",
+        },
+        "script_debug": {
+          "description": "Enable SCRIPT_DEBUG (loads non-minified scripts). Defaults to same value as enable.",
+          "type": "boolean",
+        },
+      },
+      "required": [
+        "enable",
+      ],
+      "type": "object",
+    },
+    "name": "wp_debug_toggle",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "raw": {
+          "default": false,
+          "description": "If true, return the raw file content instead of parsed constants. Default false.",
+          "type": "boolean",
+        },
+      },
+      "type": "object",
+    },
+    "name": "read_wp_config",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "name": {
+          "description": "The constant name (e.g., "WP_DEBUG", "WP_MEMORY_LIMIT").",
+          "type": "string",
+        },
+        "value": {
+          "description": "The value to set. Use PHP literal syntax: true, false, "string", or 123. Strings must include quotes.",
+          "type": "string",
+        },
+      },
+      "required": [
+        "name",
+        "value",
+      ],
+      "type": "object",
+    },
+    "name": "edit_wp_config",
+  },
+  {
+    "inputSchema": {
+      "properties": {},
+      "type": "object",
+    },
+    "name": "get_site_info",
+  },
+  {
+    "inputSchema": {
+      "properties": {},
+      "type": "object",
+    },
+    "name": "site_health_check",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "siteId": {
+          "description": "The Local site ID. Optional — defaults to the current site.",
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "site_start",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "siteId": {
+          "description": "The Local site ID. Optional — defaults to the current site.",
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "site_stop",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "siteId": {
+          "description": "The Local site ID. Optional — defaults to the current site.",
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "site_restart",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "siteId": {
+          "description": "The Local site ID. Optional — defaults to the current site.",
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "site_status",
+  },
+  {
+    "inputSchema": {
+      "properties": {},
+      "type": "object",
+    },
+    "name": "list_sites",
+  },
+]
+`;
+
+exports[`Tool definitions snapshot > tool descriptions match snapshot 1`] = `
+[
+  {
+    "description": "Run an arbitrary WP-CLI command. Pass arguments without the leading "wp" prefix. Example: args="post list --post_type=page --format=json"
+
+WARNING: Some WP-CLI commands are destructive and should only be run after confirming with the user:
+- "eval" / "eval-file" / "shell" — execute arbitrary PHP code
+- "db drop" / "db reset" — destroy the database
+- "db import" — overwrite the database
+- "plugin install <url>" / "theme install <url>" — install code from external sources
+- "site empty" / "site delete" — delete site content
+- "search-replace" (without --dry-run) — bulk modify database content
+Always confirm with the user before running these commands.",
+    "name": "wp_cli",
+  },
+  {
+    "description": "Read the PHP error log for the Local site. Returns the last N lines (default 50), parsed into structured entries when possible.",
+    "name": "read_error_log",
+  },
+  {
+    "description": "Read the nginx access log for the Local site. Returns the last N lines (default 50).",
+    "name": "read_access_log",
+  },
+  {
+    "description": "Enable or disable WordPress debug mode. Modifies WP_DEBUG, WP_DEBUG_LOG, and SCRIPT_DEBUG constants in wp-config.php.",
+    "name": "wp_debug_toggle",
+  },
+  {
+    "description": "Read and parse wp-config.php, extracting all define() constants and their values. Also shows the database table prefix.",
+    "name": "read_wp_config",
+  },
+  {
+    "description": "Add or modify a PHP constant in wp-config.php. If the constant already exists, its value is replaced. If not, it is added before the "That's all, stop editing!" comment. A backup is created before any modification.",
+    "name": "edit_wp_config",
+  },
+  {
+    "description": "Get comprehensive information about the Local site: paths, URLs, database config, PHP version, WordPress version, active plugins and theme.",
+    "name": "get_site_info",
+  },
+  {
+    "description": "Run a health check on the WordPress site: tests database connectivity, file permissions, WP_DEBUG status, log file sizes, and PHP version.",
+    "name": "site_health_check",
+  },
+  {
+    "description": "Start a Local site's services (PHP, MySQL, web server). If siteId is omitted, operates on the current site.",
+    "name": "site_start",
+  },
+  {
+    "description": "Stop a Local site's services (PHP, MySQL, web server). If siteId is omitted, operates on the current site.",
+    "name": "site_stop",
+  },
+  {
+    "description": "Restart a Local site's services (PHP, MySQL, web server). If siteId is omitted, operates on the current site.",
+    "name": "site_restart",
+  },
+  {
+    "description": "Get the current status (running, halted, etc.) of a Local site. If siteId is omitted, operates on the current site.",
+    "name": "site_status",
+  },
+  {
+    "description": "List all Local sites with their ID, name, domain, path, and current status.",
+    "name": "list_sites",
+  },
+]
+`;
