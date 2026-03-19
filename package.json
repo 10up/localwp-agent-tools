@@ -1,7 +1,7 @@
 {
 	"name": "agent-tools",
 	"productName": "Agent Tools",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "MCP server, skills, and project context for AI-powered WordPress development. Works with Claude Code, Cursor, Windsurf, and any MCP client.",
 	"keywords": [
 		"local-addon"
