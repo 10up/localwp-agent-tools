@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file, per [the Ke
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-03-19
+
+### Fixed
+
+- Add lodash as explicit dependency — required at runtime by `@getflywheel/local-components`, which prevented the renderer (UI tab) from loading.
+- Remove `prepare` script that breaks `npm install` in non-dev contexts (release packaging, local deploy).
+
 ## [0.2.0] - 2026-03-19
 
 ### Added
@@ -55,6 +62,7 @@ All notable changes to this project will be documented in this file, per [the Ke
 - Search all lightning-services directories for service binaries (props [@rickalee](https://github.com/rickalee) via [#3](https://github.com/10up/localwp-agent-tools/pull/3)).
 - Check `wp-content/debug.log` when reading PHP error logs with WP_DEBUG_LOG enabled (props [@iandunn](https://github.com/iandunn) via [#5](https://github.com/10up/localwp-agent-tools/issues/5)).
 
-[Unreleased]: https://github.com/10up/localwp-agent-tools/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/10up/localwp-agent-tools/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/10up/localwp-agent-tools/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/10up/localwp-agent-tools/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/10up/localwp-agent-tools/releases/tag/v0.1.0
