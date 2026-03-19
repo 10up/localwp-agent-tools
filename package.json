@@ -16,7 +16,6 @@
 	"scripts": {
 		"build": "tsc -p tsconfig.json",
 		"watch": "tsc -p tsconfig.json --watch",
-		"prepare": "npm run build",
 		"typecheck": "tsc --noEmit",
 		"lint": "eslint src/ tests/",
 		"lint:fix": "eslint src/ tests/ --fix",
