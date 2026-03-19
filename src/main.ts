@@ -736,7 +736,23 @@ export default function (context: LocalMain.AddonMainContext): void {
 		try {
 			mcpServerPort = await findAvailablePort();
 			httpServer = createMcpHttpServer({ registry: siteConfigRegistry, localApi });
-			await startMcpHttpServer(httpServer, mcpServerPort);
+
+			try {
+				await startMcpHttpServer(httpServer, mcpServerPort);
+			} catch (listenErr: unknown) {
+				// TOCTOU race: port was free during probe but taken before listen.
+				// Retry once with the next port.
+				const code = listenErr instanceof Error ? (listenErr as NodeJS.ErrnoException).code : '';
+				if (code === 'EADDRINUSE') {
+					console.warn(`[Agent Tools] Port ${mcpServerPort} was taken, retrying with ${mcpServerPort + 1}`);
+					mcpServerPort += 1;
+					httpServer = createMcpHttpServer({ registry: siteConfigRegistry, localApi });
+					await startMcpHttpServer(httpServer, mcpServerPort);
+				} else {
+					throw listenErr;
+				}
+			}
+
 			await savePort(mcpServerPort);
 
 			// Register configs for all sites with Agent Tools enabled (regardless of running status).
