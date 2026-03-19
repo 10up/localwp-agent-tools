@@ -138,9 +138,6 @@ agent-tools/
 │       ├── config.ts           # read_wp_config, edit_wp_config
 │       ├── site.ts             # get_site_info, site_health_check
 │       └── environment.ts      # site_start, site_stop, site_restart, site_status, list_sites
-├── templates/                  # Config templates
-│   ├── claude-md.hbs           # CLAUDE.md Handlebars template
-│   └── gitignore-additions.txt
 ├── lib/                        # Compiled output
 ├── package.json
 └── tsconfig.json
