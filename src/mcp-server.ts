@@ -51,6 +51,8 @@ interface McpHttpServerOptions {
 // Session Management
 // ---------------------------------------------------------------------------
 
+const MAX_BODY_SIZE = 1 * 1024 * 1024; // 1 MB
+
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 const sessions = new Map<string, SessionEntry>();
@@ -151,7 +153,16 @@ function createMcpServer(siteId: string, registry: SiteConfigRegistry, localApi:
 function readBody(req: http.IncomingMessage): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const chunks: Buffer[] = [];
-		req.on('data', (chunk: Buffer) => chunks.push(chunk));
+		let totalBytes = 0;
+		req.on('data', (chunk: Buffer) => {
+			totalBytes += chunk.length;
+			if (totalBytes > MAX_BODY_SIZE) {
+				req.destroy();
+				reject(new Error(`Request body exceeds maximum size of ${MAX_BODY_SIZE} bytes`));
+				return;
+			}
+			chunks.push(chunk);
+		});
 		req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
 		req.on('error', reject);
 	});
@@ -207,7 +218,16 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 
 		try {
 			if (method === 'POST') {
-				const bodyStr = await readBody(req);
+				let bodyStr: string;
+				try {
+					bodyStr = await readBody(req);
+				} catch (err) {
+					if (!res.headersSent) {
+						res.writeHead(413, { 'Content-Type': 'application/json' });
+						res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'Request body too large' }, id: null }));
+					}
+					return;
+				}
 				let body: McpRequest;
 				try {
 					body = JSON.parse(bodyStr);
