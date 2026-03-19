@@ -57,8 +57,9 @@ jobs:
                   cp package.json package-lock.json icon.png README.md "$ADDON_DIR/"
 
                   # Install only production dependencies (includes bundled)
+                  # --ignore-scripts: lib/ is already built, skip prepare hook
                   cd "$ADDON_DIR"
-                  npm ci --omit=dev
+                  npm ci --omit=dev --ignore-scripts
                   cd ..
 
                   # Create zip
