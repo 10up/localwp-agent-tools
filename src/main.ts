@@ -10,6 +10,7 @@ import {
 	findWpCli,
 } from './helpers/paths';
 import { SiteConfig, SiteConfigRegistry } from './helpers/site-config';
+import { escapeRegex } from './helpers/utils';
 import { findAvailablePort, savePort, removePortFile } from './helpers/port';
 import { createMcpHttpServer, startMcpHttpServer, stopMcpHttpServer, closeSessionsForSite } from './mcp-server';
 import { LocalApi } from './tools';
@@ -121,10 +122,6 @@ function getStoredAgents(site: Local.Site): AgentTarget[] {
 
 function isAgentToolsEnabled(site: Local.Site): boolean {
 	return !!site.customOptions?.agentToolsEnabled;
-}
-
-function escapeRegex(str: string): string {
-	return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // ---------------------------------------------------------------------------

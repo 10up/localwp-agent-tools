@@ -2,6 +2,7 @@ import { readFile, writeFile, copyFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import { SiteConfig } from '../helpers/site-config';
+import { escapeRegex } from '../helpers/utils';
 
 // ── Tool Definitions ───────────────────────────────────────────────────
 export const toolDefinitions = [
@@ -199,6 +200,3 @@ function parseDefineConstants(content: string): Record<string, string> {
 	return constants;
 }
 
-function escapeRegex(str: string): string {
-	return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
