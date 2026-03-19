@@ -7,6 +7,31 @@ import { getPhpEnvironment } from '../helpers/paths';
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Commands that are too destructive to allow through the MCP tool.
+ * Checked against the first one or two parsed arguments.
+ * Users can still run these directly in a terminal.
+ */
+const BLOCKED_COMMANDS: string[][] = [
+	['eval'],
+	['eval-file'],
+	['shell'],
+	['db', 'drop'],
+	['db', 'reset'],
+	['db', 'import'],
+	['site', 'empty'],
+	['site', 'delete'],
+];
+
+function isBlockedCommand(args: string[]): string | null {
+	for (const blocked of BLOCKED_COMMANDS) {
+		if (blocked.every((part, i) => args[i]?.toLowerCase() === part)) {
+			return blocked.join(' ');
+		}
+	}
+	return null;
+}
+
 // ── Core WP-CLI execution ──────────────────────────────────────────────
 async function runWpCli(
 	wpArgs: string[],
@@ -137,6 +162,17 @@ async function handleWpCli(
 	}
 
 	const wpArgs = splitArgs(rawArgs);
+
+	const blockedCmd = isBlockedCommand(wpArgs);
+	if (blockedCmd) {
+		return {
+			content: [{
+				type: 'text',
+				text: `Error: "wp ${blockedCmd}" is blocked for safety. This command is destructive and must be run manually in a terminal.`,
+			}],
+		};
+	}
+
 	const { stdout, stderr } = await runWpCli(wpArgs, config);
 
 	let output = stdout;
