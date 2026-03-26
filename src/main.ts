@@ -2,7 +2,14 @@ import * as path from 'path';
 import * as fs from 'fs-extra';
 import * as Local from '@getflywheel/local';
 import * as LocalMain from '@getflywheel/local/main';
-import { resolveSitePath, findPhpBinary, findMysqlBinary, findMysqlSocket, findPhpIniDir, findWpCli } from './helpers/paths';
+import {
+	resolveSitePath,
+	findPhpBinary,
+	findMysqlBinary,
+	findMysqlSocket,
+	findPhpIniDir,
+	findWpCli,
+} from './helpers/paths';
 import { SiteConfig, SiteConfigRegistry } from './helpers/site-config';
 import { findAvailablePort, savePort, removePortFile, removePortFileSync } from './helpers/port';
 import { createMcpHttpServer, startMcpHttpServer, stopMcpHttpServer, closeSessionsForSite } from './mcp-server';
