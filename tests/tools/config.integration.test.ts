@@ -28,7 +28,7 @@ function makeTempSiteConfig(tmpDir: string): SiteConfig {
 		sitePath: tmpDir,
 		wpPath: tmpDir,
 		phpBin: '/usr/bin/php',
-		phpIniDir: null,
+		phpIniDir: path.join(tmpDir, 'conf', 'php'),
 		wpCliBin: '/usr/local/bin/wp',
 		mysqlBin: '/usr/bin/mysql',
 		dbName: 'local',

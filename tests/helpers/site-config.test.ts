@@ -7,7 +7,7 @@ function makeSiteConfig(overrides: Partial<SiteConfig> = {}): SiteConfig {
 		sitePath: '/home/user/Local Sites/test-site',
 		wpPath: '/home/user/Local Sites/test-site/app/public',
 		phpBin: '/usr/bin/php',
-		phpIniDir: null,
+		phpIniDir: '/home/user/Library/Application Support/Local/run/test-site-1/conf/php',
 		wpCliBin: '/usr/local/bin/wp',
 		mysqlBin: '/usr/bin/mysql',
 		dbName: 'local',
