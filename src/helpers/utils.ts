@@ -19,6 +19,7 @@ export function buildWpCliEnv(config: SiteConfig): NodeJS.ProcessEnv {
 	return {
 		...process.env,
 		...getPhpEnvironment(config.phpBin),
+		...(config.phpIniDir ? { PHPRC: config.phpIniDir } : {}),
 		PHP: config.phpBin,
 		PATH: mysqlBinDir ? `${mysqlBinDir}${path.delimiter}${process.env.PATH || ''}` : process.env.PATH,
 		// DB connection vars — used by native MySQL tools (mysql, mysqldump, mysqlcheck)
