@@ -1,6 +1,8 @@
 # LocalWP Agent Tools
 
-A [Local](https://localwp.com/) add-on that provides an MCP server and project context for AI-powered WordPress development. Works with Claude Code, Cursor, Windsurf, VS Code Copilot, and any MCP client.
+[![Support Level](https://img.shields.io/badge/support-active-green.svg)](#support-level) [![CI](https://github.com/10up/localwp-agent-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/10up/localwp-agent-tools/actions/workflows/ci.yml) [![GPL-2.0-or-later License](https://img.shields.io/github/license/10up/localwp-agent-tools.svg)](https://github.com/10up/localwp-agent-tools/blob/main/LICENSE.md) 
+
+> A [Local](https://localwp.com/) add-on that provides an MCP server and project context for AI-powered WordPress development. Works with Claude Code, Cursor, Windsurf, VS Code Copilot, and any MCP client.
 
 ## What It Does
 
