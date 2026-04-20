@@ -7,6 +7,7 @@ export interface SiteConfig {
 	sitePath: string;
 	wpPath: string;
 	phpBin: string;
+	phpIniDir: string | null;
 	wpCliBin: string;
 	mysqlBin: string;
 	dbName: string;

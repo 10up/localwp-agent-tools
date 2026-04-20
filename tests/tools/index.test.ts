@@ -8,6 +8,7 @@ const mockConfig: SiteConfig = {
 	sitePath: '/tmp/test-site',
 	wpPath: '/tmp/test-site/app/public',
 	phpBin: '/usr/bin/php',
+	phpIniDir: '/tmp/test-site/conf/php',
 	wpCliBin: '/usr/local/bin/wp',
 	mysqlBin: '/usr/bin/mysql',
 	dbName: 'local',

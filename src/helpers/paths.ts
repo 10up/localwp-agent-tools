@@ -244,6 +244,26 @@ export function findMysqlSocket(siteId: string): string | null {
 }
 
 /**
+ * Returns the directory containing the site-specific php.ini.
+ *
+ * Local WP stores per-site PHP configuration at:
+ *   {localDataPath}/run/{siteId}/conf/php/php.ini
+ *
+ * The PHPRC environment variable expects a directory path (not a file path).
+ * PHP will look for php.ini inside that directory.
+ *
+ * @param siteId  The Local WP site ID
+ * @returns Full path to the directory containing php.ini, or null if not found
+ */
+export function findPhpIniDir(siteId: string): string | null {
+	const confDir = path.join(getRunPath(siteId), 'conf', 'php');
+	if (fs.existsSync(path.join(confDir, 'php.ini'))) {
+		return confDir;
+	}
+	return null;
+}
+
+/**
  * Tries to find WP-CLI. Checks multiple locations in priority order:
  *
  * 1. Bundled with Local app (platform-specific extraResources path)

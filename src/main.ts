@@ -2,7 +2,14 @@ import * as path from 'path';
 import * as fs from 'fs-extra';
 import * as Local from '@getflywheel/local';
 import * as LocalMain from '@getflywheel/local/main';
-import { resolveSitePath, findPhpBinary, findMysqlBinary, findMysqlSocket, findWpCli } from './helpers/paths';
+import {
+	resolveSitePath,
+	findPhpBinary,
+	findMysqlBinary,
+	findMysqlSocket,
+	findPhpIniDir,
+	findWpCli,
+} from './helpers/paths';
 import { SiteConfig, SiteConfigRegistry } from './helpers/site-config';
 import { findAvailablePort, savePort, removePortFile, removePortFileSync } from './helpers/port';
 import { createMcpHttpServer, startMcpHttpServer, stopMcpHttpServer, closeSessionsForSite } from './mcp-server';
@@ -136,6 +143,7 @@ async function buildSiteConfig(site: Local.Site): Promise<SiteConfig> {
 	const phpBin = await findPhpBinary(phpVersion);
 	const mysqlBin = await findMysqlBinary(mysqlVersion, mysqlServiceName);
 	const mysqlSocket = findMysqlSocket(siteId);
+	const phpIniDir = findPhpIniDir(siteId);
 	const wpCliBin = await findWpCli(phpVersion);
 	const mysqlPort = mysqlService?.ports?.MYSQL?.[0];
 
@@ -154,6 +162,7 @@ async function buildSiteConfig(site: Local.Site): Promise<SiteConfig> {
 		sitePath,
 		wpPath: path.join(sitePath, 'app', 'public'),
 		phpBin: phpBin || 'php',
+		phpIniDir,
 		wpCliBin: wpCliBin || '',
 		mysqlBin: mysqlBin || '',
 		dbName: site.mysql?.database || 'local',
