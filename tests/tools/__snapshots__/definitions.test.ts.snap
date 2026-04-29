@@ -184,6 +184,8 @@ exports[`Tool definitions snapshot > tool descriptions match snapshot 1`] = `
   {
     "description": "Run an arbitrary WP-CLI command. Pass arguments without the leading "wp" prefix. Example: args="post list --post_type=page --format=json"
 
+Plugins and themes are loaded by default so plugin-provided commands (e.g. "elasticpress stats", "acf", "redis") work. If a specific plugin or theme is fatally erroring, pass "--skip-plugins=<slug>" / "--skip-themes=<slug>" (or the bare flags to skip all) to bypass it.
+
 WARNING: Some WP-CLI commands are destructive and should only be run after confirming with the user:
 - "eval" / "eval-file" / "shell" — execute arbitrary PHP code
 - "db drop" / "db reset" — destroy the database
