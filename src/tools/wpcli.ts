@@ -63,9 +63,6 @@ async function runWpCli(
 		cmdArgs.push(`--path=${config.wpPath}`);
 	}
 
-	// Skip themes/plugins that may fatally error
-	cmdArgs.push('--skip-themes', '--skip-plugins');
-
 	const timeout = options?.timeout ?? 60_000;
 
 	const env = buildWpCliEnv(config);
@@ -84,6 +81,7 @@ export const toolDefinitions = [
 		name: 'wp_cli',
 		description:
 			'Run an arbitrary WP-CLI command. Pass arguments without the leading "wp" prefix. Example: args="post list --post_type=page --format=json"\n\n' +
+			'Plugins and themes are loaded by default so plugin-provided commands (e.g. "elasticpress stats", "acf", "redis") work. If a specific plugin or theme is fatally erroring, pass "--skip-plugins=<slug>" / "--skip-themes=<slug>" (or the bare flags to skip all) to bypass it.\n\n' +
 			'WARNING: Some WP-CLI commands are destructive and should only be run after confirming with the user:\n' +
 			'- "eval" / "eval-file" / "shell" — execute arbitrary PHP code\n' +
 			'- "db drop" / "db reset" — destroy the database\n' +
