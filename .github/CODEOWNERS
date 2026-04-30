@@ -1,0 +1,3 @@
+# Default owner for everything in the repo.
+# Ensures all PRs (including Dependabot) get a reviewer auto-assigned.
+* @christianc1
