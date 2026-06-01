@@ -46,8 +46,8 @@ const AGENT_TARGETS: Record<AgentTarget, AgentTargetConfig> = {
 		label: 'Claude Code',
 		mcpConfigPath: '.mcp.json',
 		mcpConfigTopLevelKey: 'mcpServers',
-		contextFilePath: 'CLAUDE.md',
-		gitignoreEntries: ['.mcp.json', 'CLAUDE.md'],
+		contextFilePath: 'CLAUDE.local.md',
+		gitignoreEntries: ['.mcp.json', 'CLAUDE.local.md'],
 	},
 	cursor: {
 		label: 'Cursor',
@@ -398,6 +398,27 @@ async function updateGitignore(dirPath: string, agents: AgentTarget[]): Promise<
 }
 
 // ---------------------------------------------------------------------------
+// Migration Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Removes any Agent Tools marker block from CLAUDE.md left by older versions
+ * that wrote context there instead of CLAUDE.local.md.
+ */
+async function migrateClaude(projectPath: string): Promise<void> {
+	const legacyPath = path.join(projectPath, 'CLAUDE.md');
+	if (!(await fs.pathExists(legacyPath))) return;
+
+	const content = await fs.readFile(legacyPath, 'utf-8');
+	const markerRegex = new RegExp(
+		`${escapeRegex(CONTEXT_MARKER_START)}[\\s\\S]*?${escapeRegex(CONTEXT_MARKER_END)}`,
+	);
+	if (!markerRegex.test(content)) return;
+
+	await removeContextFile(legacyPath, 'claude');
+}
+
+// ---------------------------------------------------------------------------
 // Core Functions
 // ---------------------------------------------------------------------------
 
@@ -415,10 +436,15 @@ async function setupSite(site: Local.Site, notifier: any, projectDir: string, ag
 	const siteConfig = await buildSiteConfig(site);
 	siteConfigRegistry.register(siteConfig);
 
-	// 2. Generate project context
+	// 2. Migrate legacy CLAUDE.md content to CLAUDE.local.md (no-op if already clean)
+	if (agents.includes('claude')) {
+		await migrateClaude(projectPath);
+	}
+
+	// 3. Generate project context
 	const contextContent = generateProjectContext(site);
 
-	// 3. For each selected agent, write configs
+	// 4. For each selected agent, write configs
 	for (const agent of agents) {
 		const agentConfig = AGENT_TARGETS[agent];
 
@@ -606,6 +632,11 @@ async function regenerateConfig(site: Local.Site): Promise<void> {
 	// Rebuild SiteConfig and re-register
 	const siteConfig = await buildSiteConfig(site);
 	siteConfigRegistry.register(siteConfig);
+
+	// Migrate legacy CLAUDE.md content on regenerate (no-op if already clean)
+	if (agents.includes('claude')) {
+		await migrateClaude(projectPath);
+	}
 
 	const contextContent = generateProjectContext(site);
 
