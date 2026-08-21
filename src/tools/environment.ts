@@ -3,12 +3,27 @@ import { SiteConfig } from '../helpers/site-config';
 // ── LocalApi interface ─────────────────────────────────────────────────
 // Implemented in main.ts, wrapping Local's SiteProcessManager APIs.
 
+export interface PreviewInfo {
+	id: string;
+	name: string;
+	domain: string;
+	siteUrl: string;
+	sitePath: string;
+	wpPath: string;
+	status: string;
+	parentSiteId: string;
+	mcpUrl: string;
+}
+
 export interface LocalApi {
 	startSite(siteId: string): Promise<{ id: string; name?: string; status: string; message?: string }>;
 	stopSite(siteId: string): Promise<{ id: string; name?: string; status: string; message?: string }>;
 	restartSite(siteId: string): Promise<{ id: string; name?: string; status: string; message?: string }>;
 	getSiteStatus(siteId: string): Promise<{ id: string; name?: string; domain?: string; status: string }>;
 	listSites(): Promise<Array<{ id: string; name: string; domain: string; path: string; status: string }>>;
+	createPreview(parentSiteId: string, label?: string): Promise<PreviewInfo>;
+	listPreviews(): Promise<PreviewInfo[]>;
+	destroyPreview(siteId: string): Promise<{ id: string; name: string; deleted: true }>;
 }
 
 // ── Tool Definitions ───────────────────────────────────────────────────

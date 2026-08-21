@@ -9,6 +9,10 @@ exports[`Tool definitions snapshot > matches the expected tool API surface 1`] =
           "description": "WP-CLI arguments (without "wp" prefix). Example: "post list --post_type=page --format=json"",
           "type": "string",
         },
+        "siteId": {
+          "description": "Optional Local site ID to run this against a different registered site — for example a preview created by preview_start. Defaults to this endpoint's site.",
+          "type": "string",
+        },
       },
       "required": [
         "args",
@@ -29,6 +33,10 @@ exports[`Tool definitions snapshot > matches the expected tool API surface 1`] =
           "description": "Number of lines to return from the end of the log. Default 50.",
           "type": "number",
         },
+        "siteId": {
+          "description": "Optional Local site ID to run this against a different registered site — for example a preview created by preview_start. Defaults to this endpoint's site.",
+          "type": "string",
+        },
       },
       "type": "object",
     },
@@ -45,6 +53,10 @@ exports[`Tool definitions snapshot > matches the expected tool API surface 1`] =
           "default": 50,
           "description": "Number of lines to return from the end of the log. Default 50.",
           "type": "number",
+        },
+        "siteId": {
+          "description": "Optional Local site ID to run this against a different registered site — for example a preview created by preview_start. Defaults to this endpoint's site.",
+          "type": "string",
         },
       },
       "type": "object",
@@ -66,6 +78,10 @@ exports[`Tool definitions snapshot > matches the expected tool API surface 1`] =
           "description": "Enable SCRIPT_DEBUG (loads non-minified scripts). Defaults to same value as enable.",
           "type": "boolean",
         },
+        "siteId": {
+          "description": "Optional Local site ID to run this against a different registered site — for example a preview created by preview_start. Defaults to this endpoint's site.",
+          "type": "string",
+        },
       },
       "required": [
         "enable",
@@ -82,6 +98,10 @@ exports[`Tool definitions snapshot > matches the expected tool API surface 1`] =
           "description": "If true, return the raw file content instead of parsed constants. Default false.",
           "type": "boolean",
         },
+        "siteId": {
+          "description": "Optional Local site ID to run this against a different registered site — for example a preview created by preview_start. Defaults to this endpoint's site.",
+          "type": "string",
+        },
       },
       "type": "object",
     },
@@ -92,6 +112,10 @@ exports[`Tool definitions snapshot > matches the expected tool API surface 1`] =
       "properties": {
         "name": {
           "description": "The constant name (e.g., "WP_DEBUG", "WP_MEMORY_LIMIT").",
+          "type": "string",
+        },
+        "siteId": {
+          "description": "Optional Local site ID to run this against a different registered site — for example a preview created by preview_start. Defaults to this endpoint's site.",
           "type": "string",
         },
         "value": {
@@ -109,14 +133,24 @@ exports[`Tool definitions snapshot > matches the expected tool API surface 1`] =
   },
   {
     "inputSchema": {
-      "properties": {},
+      "properties": {
+        "siteId": {
+          "description": "Optional Local site ID to run this against a different registered site — for example a preview created by preview_start. Defaults to this endpoint's site.",
+          "type": "string",
+        },
+      },
       "type": "object",
     },
     "name": "get_site_info",
   },
   {
     "inputSchema": {
-      "properties": {},
+      "properties": {
+        "siteId": {
+          "description": "Optional Local site ID to run this against a different registered site — for example a preview created by preview_start. Defaults to this endpoint's site.",
+          "type": "string",
+        },
+      },
       "type": "object",
     },
     "name": "site_health_check",
@@ -175,6 +209,44 @@ exports[`Tool definitions snapshot > matches the expected tool API surface 1`] =
       "type": "object",
     },
     "name": "list_sites",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "label": {
+          "description": "Short purpose label for this preview — what work it is for, not the word "preview" (e.g. "Polylang Fix", "player-v3", a branch or ticket id). Names the site "<Parent Name> - <label>". Omitting it falls back to a random suffix, which humans cannot tell apart — always provide one.",
+          "type": "string",
+        },
+        "siteId": {
+          "description": "The Local site ID of the site to clone. Optional — defaults to the current site.",
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "preview_start",
+  },
+  {
+    "inputSchema": {
+      "properties": {},
+      "type": "object",
+    },
+    "name": "preview_list",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "siteId": {
+          "description": "The Local site ID of the preview to delete.",
+          "type": "string",
+        },
+      },
+      "required": [
+        "siteId",
+      ],
+      "type": "object",
+    },
+    "name": "preview_destroy",
   },
 ]
 `;
@@ -243,6 +315,20 @@ Always confirm with the user before running these commands.",
   {
     "description": "List all Local sites with their ID, name, domain, path, and current status.",
     "name": "list_sites",
+  },
+  {
+    "description": "Clone a Local site (default: the current site) into a disposable preview site with its own database, PHP/MySQL processes, domain, and logs. Returns the preview's own MCP endpoint URL and is intended for isolated agent work (for example, a git worktree). Cloning copies the full database and wp-content and may take a while on large sites.
+
+Always pass a "label" describing the purpose of the preview (the task, branch, or ticket — e.g. "Polylang Fix", "player-v3", "PROJ-123"). The site is named "<Parent Name> - <label>" so a human can scan Local's sidebar and know what each preview is for. Never reuse a label that is still in use.",
+    "name": "preview_start",
+  },
+  {
+    "description": "List all disposable preview sites and their MCP endpoint URLs.",
+    "name": "preview_list",
+  },
+  {
+    "description": "Permanently delete a preview site, with its files moved to trash. ONLY works on sites created by preview_start and refuses to delete regular sites.",
+    "name": "preview_destroy",
   },
 ]
 `;

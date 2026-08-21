@@ -12,8 +12,10 @@ import {
 } from './helpers/paths';
 import { SiteConfig, SiteConfigRegistry } from './helpers/site-config';
 import { findAvailablePort, savePort, removePortFile, removePortFileSync } from './helpers/port';
+import { copyTree, retargetSymlinks } from './helpers/fast-copy';
 import { createMcpHttpServer, startMcpHttpServer, stopMcpHttpServer, closeSessionsForSite } from './mcp-server';
-import { LocalApi } from './tools';
+import { LocalApi, PreviewInfo } from './tools';
+import { execWpCli } from './tools/wpcli';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -121,6 +123,10 @@ function getStoredAgents(site: Local.Site): AgentTarget[] {
 
 function isAgentToolsEnabled(site: Local.Site): boolean {
 	return !!site.customOptions?.agentToolsEnabled;
+}
+
+function isPreviewSite(site: Local.Site): boolean {
+	return site.customOptions?.agentToolsPreview === true;
 }
 
 function escapeRegex(str: string): string {
@@ -732,6 +738,334 @@ function createLocalApi(): LocalApi {
 				status: statuses[site.id] || 'unknown',
 			}));
 		},
+
+		async createPreview(parentSiteId: string, label?: string): Promise<PreviewInfo> {
+			const parent = LocalMain.SiteData.getSite(parentSiteId);
+			if (!parent) throw new Error(`Site not found: ${parentSiteId}`);
+			if (isPreviewSite(parent)) {
+				throw new Error('Create previews from the primary site, not from another preview.');
+			}
+
+			// Purpose-labeled names ("Amazing Facts - Polylang Fix") let a human scan
+			// Local's sidebar and know what each preview is for; the random suffix is
+			// only a fallback for label-less calls.
+			const suffix = Math.random().toString(36).slice(2, 8).padEnd(6, '0');
+			const newSiteName = label?.trim() ? `${parent.name} - ${label.trim()}` : `${parent.name} Preview ${suffix}`;
+			const sites = LocalMain.SiteData.getSites();
+			if ((Object.values(sites) as Local.Site[]).some((site) => site.name === newSiteName)) {
+				throw new Error(
+					`A site named "${newSiteName}" already exists. Pick a different label, or use preview_list to find ` +
+						'the existing preview and reuse or destroy it.',
+				);
+			}
+
+			const serviceContainer = LocalMain.getServiceContainer();
+			const {
+				siteProcessManager,
+				siteProvisioner,
+				siteDatabase,
+				changeSiteDomain,
+				lightningServices,
+				sitesOrganization,
+				localLogger,
+			} = serviceContainer.cradle;
+			// Route step logs through Local's logger so they land in
+			// local-lightning.log — the add-on's stdout is lost in normal launches.
+			// Every preview run benchmarks itself: one info line per step with ms.
+			const logger = localLogger.child({ thread: 'main', class: 'AgentToolsPreview' });
+			// Local's renderer only learns about sites from IPC events, so mirror the
+			// status updates CloneSite sends (but never selectSite — a background
+			// preview must not steal the user's UI selection).
+			let previewIdForUi: string | null = null;
+			const runStep = async <T>(step: string, action: () => Promise<T>): Promise<T> => {
+				const stepStart = Date.now();
+				logger.info(`preview step started: ${step}`, { step, parentSiteId });
+				try {
+					const result = await action();
+					logger.info(`preview step finished: ${step}`, { step, parentSiteId, ms: Date.now() - stepStart });
+					return result;
+				} catch (err: unknown) {
+					if (previewIdForUi) {
+						try {
+							LocalMain.sendIPCEvent('updateSiteStatus', previewIdForUi, 'halted');
+							LocalMain.sendIPCEvent('updateSiteMessage', previewIdForUi, '');
+						} catch {
+							// Best-effort UI update only
+						}
+					}
+					const message = err instanceof Error ? err.message : String(err);
+					const stepError = new Error(`preview provision failed at ${step}: ${message}`);
+					(stepError as Error & { cause?: unknown }).cause = err;
+					throw stepError;
+				}
+			};
+
+			const preview = await runStep('record', async () => {
+				const dupJson = JSON.parse(JSON.stringify(parent)) as Local.SiteJSON & {
+					localBackupRepoID?: string;
+					remoteBackups?: { resticRepoId?: string };
+				};
+				let id: string;
+				do {
+					id = '';
+					while (id.length < 12) id += Math.random().toString(36).slice(2);
+					id = id.slice(0, 12);
+				} while (LocalMain.SiteData.getSite(id));
+
+				const niceName = newSiteName
+					.toLowerCase()
+					.replace(/[^a-z0-9]+/g, '-')
+					.replace(/^-|-$/g, '');
+				const lastDot = parent.domain.lastIndexOf('.');
+				const tld =
+					lastDot >= 0 && lastDot < parent.domain.length - 1 ? parent.domain.slice(lastDot) : '.local';
+				let domainSuffix = 0;
+				let candidateDomain = `${niceName}${tld}`;
+				while (LocalMain.SiteData.getSiteByProperty('domain', candidateDomain)) {
+					domainSuffix += 1;
+					candidateDomain = `${niceName}-${domainSuffix}${tld}`;
+				}
+
+				const parentPath = getSitePath(parent);
+				let pathSuffix = 0;
+				let candidatePath = path.join(path.dirname(parentPath), niceName);
+				while (
+					LocalMain.SiteData.getSiteByProperty('path', candidatePath) ||
+					(await fs.pathExists(candidatePath))
+				) {
+					pathSuffix += 1;
+					candidatePath = path.join(path.dirname(parentPath), `${niceName}-${pathSuffix}`);
+				}
+
+				dupJson.id = id;
+				dupJson.name = newSiteName;
+				dupJson.domain = candidateDomain;
+				dupJson.path = candidatePath;
+				delete dupJson.liveLinkSettings;
+				delete dupJson.localBackupRepoID;
+				if (dupJson.remoteBackups) delete dupJson.remoteBackups.resticRepoId;
+
+				const customOptions = { ...dupJson.customOptions };
+				delete customOptions.agentToolsEnabled;
+				delete customOptions.agentToolsProjectDir;
+				delete customOptions.agentToolsAgents;
+				dupJson.customOptions = {
+					...customOptions,
+					agentToolsPreview: true,
+					agentToolsPreviewOf: parentSiteId,
+				};
+
+				LocalMain.SiteData.addSite(id, dupJson);
+				const dupSite = LocalMain.SiteData.getSite(id);
+				if (!dupSite) throw new Error(`site record was not readable after addSite: ${id}`);
+				previewIdForUi = dupSite.id;
+				sitesOrganization.moveSitesToGroup([dupSite.id], 'default', true);
+				LocalMain.sendIPCEvent('updateSiteStatus', dupSite.id, 'provisioning');
+				return dupSite;
+			});
+
+			await runStep('files', async () => {
+				LocalMain.sendIPCEvent('updateSiteMessage', preview.id, 'Copying site files');
+				const src = getSitePath(parent);
+				const dest = getSitePath(preview);
+				let copied = false;
+				if (process.platform === 'darwin') {
+					const result = await copyTree(src, dest);
+					if (result.method === 'clonefile') {
+						logger.info('preview files copy method', { method: result.method });
+						copied = true;
+					} else {
+						await fs.remove(dest);
+					}
+				}
+				if (!copied) {
+					const result = await copyTree(src, dest, { exclude: ['node_modules', '.git'] });
+					logger.info('preview files copy method', { method: result.method });
+				}
+
+				// Absolute symlinks in the copy (e.g. Query Monitor's db.php drop-in)
+				// still point into the parent tree and double-load parent code.
+				const retargeted = await retargetSymlinks(dest, src, dest);
+				if (retargeted > 0) {
+					logger.info('preview retargeted parent-pointing symlinks', { retargeted });
+				}
+			});
+
+			await runStep('provision', () => siteProvisioner.provision(preview));
+			await runStep('db-stop', () => siteProcessManager.stop(preview, { dumpDatabase: false }));
+			await runStep('db-copy', async () => {
+				LocalMain.sendIPCEvent('updateSiteMessage', preview.id, 'Copying site database');
+				const parentDatabaseService = lightningServices.getSiteServiceByRole(
+					parent,
+					Local.SiteServiceRole.DATABASE,
+				);
+				const previewDatabaseService = lightningServices.getSiteServiceByRole(
+					preview,
+					Local.SiteServiceRole.DATABASE,
+				);
+				if (!parentDatabaseService) throw new Error('parent database service was not found');
+				if (!previewDatabaseService) throw new Error('preview database service was not found');
+
+				// Local's type omits dataPath even though database services expose it at runtime.
+				const parentDataPath = (parentDatabaseService as unknown as { dataPath?: string }).dataPath;
+				const previewDataPath = (previewDatabaseService as unknown as { dataPath?: string }).dataPath;
+				if (!parentDataPath) throw new Error('parent database service has no dataPath');
+				if (!previewDataPath) throw new Error('preview database service has no dataPath');
+
+				await fs.emptyDir(previewDataPath);
+				// Local also copies the live parent data directory and relies on InnoDB crash recovery.
+				const result = await copyTree(parentDataPath, previewDataPath, { intoExisting: true });
+				logger.info('preview db copy method', { method: result.method });
+			});
+			await runStep('start', () => siteProcessManager.start(preview));
+			await runStep('db-wait', () => siteDatabase.waitForDB(preview));
+			await runStep('domain', async () => {
+				const currentPreviewSite = LocalMain.SiteData.getSite(preview.id);
+				if (!currentPreviewSite) {
+					throw new Error(`preview site was not readable before domain rewrite: ${preview.id}`);
+				}
+
+				const config = await buildSiteConfig(currentPreviewSite);
+				const oldDomain = parent.domain;
+				const newDomain = preview.domain;
+				if (!oldDomain || !newDomain) throw new Error('preview domain rewrite requires two non-empty domains');
+				if (oldDomain === newDomain) throw new Error('preview domain must differ from the parent domain');
+
+				// A single bare-domain pass subsumes protocol-specific passes: the
+				// domain is a substring of every http(s) URL, and previews never
+				// change protocol. search-replace scans every table per pass, so
+				// one pass instead of three is the dominant cost saving on big DBs.
+				const replacements = [[oldDomain, newDomain]];
+				for (const [oldValue, newValue] of replacements) {
+					const { stdout } = await execWpCli(
+						config,
+						[
+							`--url=${oldDomain}`,
+							'search-replace',
+							oldValue,
+							newValue,
+							'--all-tables-with-prefix',
+							'--report-changed-only',
+							'--format=count',
+						],
+						{ skipPlugins: true, skipThemes: true, neutralizeMuPlugins: true, timeoutMs: 10 * 60_000 },
+					);
+					logger.info('preview domain rewrite pass', {
+						from: oldValue,
+						to: newValue,
+						changed: stdout.trim(),
+					});
+				}
+
+				const wpConfigCandidates = [
+					path.join(config.wpPath, 'wp-config.php'),
+					path.join(path.dirname(config.wpPath), 'wp-config.php'),
+				];
+				let wpConfigPath: string | undefined;
+				for (const candidate of wpConfigCandidates) {
+					if (await fs.pathExists(candidate)) {
+						wpConfigPath = candidate;
+						break;
+					}
+				}
+				if (!wpConfigPath) throw new Error('wp-config.php was not found in or above the WordPress path');
+
+				const wpConfig = await fs.readFile(wpConfigPath, 'utf8');
+				let rewrittenWpConfig = wpConfig.split(oldDomain).join(newDomain);
+
+				// Persistent object caches (Redis/Memcached drop-ins) are shared with
+				// the parent site, so the preview must namespace its cache keys or it
+				// reads the parent's cached data. Insert-or-replace both constants.
+				const cachePrefix = `preview-${preview.id}:`;
+				for (const constant of ['WP_REDIS_PREFIX', 'WP_CACHE_KEY_SALT']) {
+					const defineRegex = new RegExp(
+						`define\\(\\s*['"]${constant}['"]\\s*,\\s*(?:'[^']*'|"[^"]*")\\s*\\)`,
+					);
+					const replacement = `define( '${constant}', '${cachePrefix}' )`;
+					if (defineRegex.test(rewrittenWpConfig)) {
+						rewrittenWpConfig = rewrittenWpConfig.replace(defineRegex, replacement);
+					} else {
+						rewrittenWpConfig = rewrittenWpConfig.replace(
+							/<\?php\s*\n/,
+							(match) => `${match}${replacement};\n`,
+						);
+					}
+				}
+
+				if (rewrittenWpConfig !== wpConfig) {
+					await fs.writeFile(wpConfigPath, rewrittenWpConfig, 'utf8');
+				}
+
+				try {
+					await changeSiteDomain.changeSiteDomainToHost(preview);
+				} catch (err: unknown) {
+					const message = err instanceof Error ? err.message : String(err);
+					logger.warn('preview changeSiteDomainToHost finisher failed (non-fatal)', { message });
+				}
+			});
+
+			return runStep('register', async () => {
+				const currentPreview = LocalMain.SiteData.getSite(preview.id) || preview;
+				const config = await buildSiteConfig(currentPreview);
+				siteConfigRegistry.register(config);
+
+				LocalMain.sendIPCEvent('updateSiteStatus', currentPreview.id, 'running');
+				LocalMain.sendIPCEvent('updateSiteMessage', currentPreview.id, '');
+				await LocalMain.HooksMain.doActions('siteAdded', currentPreview);
+				LocalMain.sendIPCEvent('siteAdded', currentPreview);
+
+				return {
+					id: currentPreview.id,
+					name: currentPreview.name,
+					domain: config.siteDomain,
+					siteUrl: config.siteUrl,
+					sitePath: config.sitePath,
+					wpPath: config.wpPath,
+					status: siteProcessManager.getSiteStatus(currentPreview),
+					parentSiteId,
+					mcpUrl: `http://localhost:${mcpServerPort}/sites/${currentPreview.id}/mcp`,
+				};
+			});
+		},
+
+		async listPreviews(): Promise<PreviewInfo[]> {
+			const serviceContainer = LocalMain.getServiceContainer();
+			const siteProcessManager = serviceContainer.cradle.siteProcessManager;
+			const statuses = siteProcessManager.getSiteStatuses();
+			const sites = LocalMain.SiteData.getSites();
+
+			return (Object.values(sites) as Local.Site[]).filter(isPreviewSite).map((site) => {
+				const sitePath = getSitePath(site);
+
+				return {
+					id: site.id,
+					name: site.name,
+					domain: site.domain || '',
+					siteUrl: `https://${site.domain || ''}`,
+					sitePath,
+					wpPath: path.join(sitePath, 'app', 'public'),
+					status: statuses[site.id] || 'unknown',
+					parentSiteId: site.customOptions?.agentToolsPreviewOf || '',
+					mcpUrl: `http://localhost:${mcpServerPort}/sites/${site.id}/mcp`,
+				};
+			});
+		},
+
+		async destroyPreview(siteId: string) {
+			const site = LocalMain.SiteData.getSite(siteId);
+			if (!site) throw new Error(`Site not found: ${siteId}`);
+			if (site.customOptions?.agentToolsPreview !== true) {
+				throw new Error('Refusing to delete a non-preview site.');
+			}
+
+			closeSessionsForSite(siteId);
+			siteConfigRegistry.unregister(siteId);
+
+			const serviceContainer = LocalMain.getServiceContainer();
+			await serviceContainer.cradle.deleteSite.deleteSite({ site, trashFiles: true, updateHosts: true });
+
+			return { id: site.id, name: site.name, deleted: true };
+		},
 	};
 }
 
@@ -769,14 +1103,15 @@ export default function (context: LocalMain.AddonMainContext): void {
 
 			await savePort(mcpServerPort);
 
-			// Register configs for all sites with Agent Tools enabled (regardless of running status).
+			// Register configs for all sites with Agent Tools enabled and all preview sites
+			// (regardless of running status).
 			// This ensures the MCP endpoint is always reachable — tools that need the site
 			// running (WP-CLI, DB) will return appropriate errors; file-based tools still work.
 			try {
 				const sites = LocalMain.SiteData.getSites();
 
 				for (const site of Object.values(sites) as Local.Site[]) {
-					if (isAgentToolsEnabled(site)) {
+					if (isAgentToolsEnabled(site) || isPreviewSite(site)) {
 						try {
 							const siteConfig = await buildSiteConfig(site);
 							siteConfigRegistry.register(siteConfig);

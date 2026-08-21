@@ -1,7 +1,7 @@
 import * as http from 'http';
 import { randomUUID } from 'crypto';
 import { SiteConfigRegistry } from './helpers/site-config';
-import { allToolDefinitions, handleToolCall, LocalApi } from './tools';
+import { allToolDefinitions, crossSiteToolNames, handleToolCall, LocalApi } from './tools';
 
 // ---------------------------------------------------------------------------
 // MCP SDK — loaded via require() for CJS compatibility.
@@ -135,14 +135,25 @@ function createMcpServer(siteId: string, registry: SiteConfigRegistry, localApi:
 
 	server.setRequestHandler(CallToolRequestSchema, async (request: McpRequest) => {
 		const { name, arguments: args } = request.params;
-		console.log(`[Agent Tools] Tool called: ${name} (site: ${siteId})`);
+
+		// Site-bound tools accept an optional siteId to target another registered
+		// site (e.g. a preview) without the client reconnecting to its endpoint.
+		const argSiteId = (args as Record<string, unknown> | undefined)?.siteId;
+		const targetSiteId =
+			crossSiteToolNames.has(name) && typeof argSiteId === 'string' && argSiteId ? argSiteId : siteId;
+		console.log(`[Agent Tools] Tool called: ${name} (site: ${targetSiteId})`);
 
 		// Look up config fresh on every call so we always use the latest
 		// (e.g., after site start updates socket paths, PHP binary, etc.)
-		const config = registry.get(siteId);
+		const config = registry.get(targetSiteId);
 		if (!config) {
+			const text =
+				targetSiteId === siteId
+					? `Site ${siteId} is no longer registered.`
+					: `Site ${targetSiteId} is not registered with Agent Tools. Use preview_list or list_sites to find ` +
+						'valid targets; previews register when preview_start completes.';
 			return {
-				content: [{ type: 'text', text: `Site ${siteId} is no longer registered.` }],
+				content: [{ type: 'text', text }],
 				isError: true,
 			};
 		}
