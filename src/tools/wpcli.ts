@@ -1,4 +1,5 @@
 import { execFile } from 'child_process';
+import * as path from 'path';
 import { promisify } from 'util';
 import { SiteConfig } from '../helpers/site-config';
 import { buildWpCliEnv } from '../helpers/utils';
@@ -31,10 +32,15 @@ export function isBlockedCommand(args: string[]): string | null {
 }
 
 // ── Core WP-CLI execution ──────────────────────────────────────────────
-async function runWpCli(
-	wpArgs: string[],
+export async function execWpCli(
 	config: SiteConfig,
-	options?: { timeout?: number },
+	args: string[],
+	opts?: {
+		skipPlugins?: boolean;
+		skipThemes?: boolean;
+		neutralizeMuPlugins?: boolean;
+		timeoutMs?: number;
+	},
 ): Promise<{ stdout: string; stderr: string }> {
 	if (!config.wpCliBin) {
 		throw new Error(
@@ -55,24 +61,38 @@ async function runWpCli(
 		cmdArgs.push('-d', `pdo_mysql.default_socket=${config.dbSocket}`);
 	}
 
-	cmdArgs.push(config.wpCliBin, ...wpArgs);
+	cmdArgs.push(config.wpCliBin, ...args);
 
 	// Always ensure --path is set unless the user explicitly passed it
-	const hasPathArg = wpArgs.some((a) => a.startsWith('--path=') || a === '--path');
+	const hasPathArg = args.some((a) => a.startsWith('--path=') || a === '--path');
 	if (!hasPathArg && config.wpPath) {
 		cmdArgs.push(`--path=${config.wpPath}`);
 	}
 
-	const timeout = options?.timeout ?? 60_000;
+	if (opts?.skipThemes) cmdArgs.push('--skip-themes');
+	if (opts?.skipPlugins) cmdArgs.push('--skip-plugins');
+	if (opts?.neutralizeMuPlugins) {
+		cmdArgs.push(`--exec=define("WPMU_PLUGIN_DIR", "${path.join(config.sitePath, '.agent-tools-empty-mu')}");`);
+	}
+
+	const timeout = opts?.timeoutMs ?? 60_000;
 
 	const env = buildWpCliEnv(config);
 
-	return execFileAsync(config.phpBin, cmdArgs, {
-		cwd: config.wpPath,
-		timeout,
-		maxBuffer: 10 * 1024 * 1024,
-		env,
-	});
+	try {
+		return await execFileAsync(config.phpBin, cmdArgs, {
+			cwd: config.wpPath,
+			timeout,
+			maxBuffer: 10 * 1024 * 1024,
+			env,
+		});
+	} catch (err: unknown) {
+		const execError = err as Error & { stdout?: string; stderr?: string };
+		const output = [execError.stderr, execError.stdout].filter(Boolean).join('\n');
+		const wpCliError = new Error(output ? `${execError.message}\n${output}` : execError.message);
+		(wpCliError as Error & { cause?: unknown }).cause = err;
+		throw wpCliError;
+	}
 }
 
 // ── Tool Definitions ───────────────────────────────────────────────────
@@ -147,7 +167,9 @@ async function handleWpCli(
 		};
 	}
 
-	const { stdout, stderr } = await runWpCli(wpArgs, config);
+	// Plugins and themes load by default (upstream fa592b6) so plugin-provided
+	// commands work; callers pass --skip-plugins/--skip-themes in args as needed.
+	const { stdout, stderr } = await execWpCli(config, wpArgs);
 
 	let output = stdout;
 	if (stderr && stderr.trim()) {
