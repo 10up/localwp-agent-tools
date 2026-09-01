@@ -36,23 +36,43 @@ Sites remain registered even when stopped, so the MCP endpoint is always reachab
 | Windsurf        | `.windsurf/mcp.json` | `.windsurfrules`                  |
 | VS Code Copilot | `.vscode/mcp.json`   | `.github/copilot-instructions.md` |
 
-## MCP Tools (12 total)
+## MCP Tools (14 total)
 
-| Category        | Tools               | Description                                                                                                |
-| --------------- | ------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **WP-CLI**      | `wp_cli`            | Run any WP-CLI command (database queries, imports, exports, search-replace, plugin/theme management, etc.) |
-| **Logs**        | `read_error_log`    | Read and parse the PHP error log                                                                           |
-|                 | `read_access_log`   | Read the nginx access log                                                                                  |
-|                 | `wp_debug_toggle`   | Enable/disable WP_DEBUG, WP_DEBUG_LOG, and SCRIPT_DEBUG                                                    |
-| **Config**      | `read_wp_config`    | Parse wp-config.php constants and table prefix                                                             |
-|                 | `edit_wp_config`    | Add or modify a wp-config.php constant (with backup)                                                       |
-| **Site**        | `get_site_info`     | Paths, URLs, database config, PHP/WP versions, active plugins and theme                                    |
-|                 | `site_health_check` | Database connectivity, file permissions, WP_DEBUG status, log sizes, PHP version                           |
-| **Environment** | `site_start`        | Start a site's services (PHP, MySQL, web server)                                                           |
-|                 | `site_stop`         | Stop a site's services                                                                                     |
-|                 | `site_restart`      | Restart a site's services                                                                                  |
-|                 | `site_status`       | Get current status of a site                                                                               |
-|                 | `list_sites`        | List all Local sites with status                                                                           |
+| Category        | Tools                   | Description                                                                                                |
+| --------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **WP-CLI**      | `wp_cli`                | Run any WP-CLI command (database queries, imports, exports, search-replace, plugin/theme management, etc.) |
+| **Logs**        | `read_error_log`        | Read and parse the PHP error log                                                                           |
+|                 | `read_access_log`       | Read the nginx access log                                                                                  |
+|                 | `wp_debug_toggle`       | Enable/disable WP_DEBUG, WP_DEBUG_LOG, and SCRIPT_DEBUG                                                    |
+| **Config**      | `read_wp_config`        | Parse wp-config.php constants and table prefix                                                             |
+|                 | `edit_wp_config`        | Add or modify a wp-config.php constant (with backup)                                                       |
+| **Site**        | `get_site_info`         | Paths, URLs, database config, PHP/WP versions, active plugins and theme                                    |
+|                 | `site_health_check`     | Database connectivity, file permissions, WP_DEBUG status, log sizes, PHP version                           |
+| **Environment** | `site_start`            | Start a site's services (PHP, MySQL, web server)                                                           |
+|                 | `site_stop`             | Stop a site's services                                                                                     |
+|                 | `site_restart`          | Restart a site's services                                                                                  |
+|                 | `site_status`           | Get current status of a site                                                                               |
+|                 | `list_sites`            | List all Local sites with status                                                                           |
+|                 | `create_site`           | Create a new WordPress site in Local, optionally enabling Agent Tools on it                                |
+|                 | `list_service_versions` | PHP, database, and web server versions available to `create_site`                                          |
+
+### Creating sites
+
+`create_site` drives the same code path as Local's own **Add Site** flow, so a new site gets provisioned services and a real WordPress install:
+
+```
+create_site({ name: "Client Redesign", phpVersion: "8.2.29", enableAgentTools: true })
+```
+
+Three things to know:
+
+- **It returns before the site is ready.** Provisioning takes a minute or more — longer when Local has to download service binaries first — which is well past most MCP clients' request timeout. The call returns as soon as the site is registered, and `site_status` reports `adding` → `provisioning` → `running`. Poll that until it reports `running`. Pass `wait: true` to block instead, only if your client tolerates long tool calls.
+- **Local may ask for the user's password.** Unless Local is set to localhost router mode, provisioning shells out to update `/etc/hosts` and macOS/Windows will prompt for administrator credentials. Site creation is never fully unattended.
+- **Failures surface on the next poll.** If provisioning fails after the call returns, `site_status` includes a `creationError` field explaining why.
+
+Omit `phpVersion`, `database` and `webServer` to accept Local's own defaults, or call `list_service_versions` first to see what is available. Versions reported with `installed: false` are downloaded on demand, which makes creation considerably slower.
+
+With `enableAgentTools: true`, Agent Tools is turned on for the site once it finishes provisioning — registering it with the MCP server and writing its MCP config and context files, exactly as clicking **Enable** in the UI does. Use `agents` to pick which ones (defaults to `["claude"]`).
 
 ## Installation
 

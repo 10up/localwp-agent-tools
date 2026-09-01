@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file, per [the Ke
 
 ## [Unreleased]
 
+### Added
+
+- `create_site` MCP tool — create a new WordPress site in Local, with optional PHP / database / web server versions, multisite mode, WordPress admin credentials, and Xdebug. Returns as soon as the site is registered so the call does not outlive the MCP client's request timeout; poll `site_status` until the site reports `running`, or pass `wait: true` to block.
+- `create_site` can enable Agent Tools on the site it creates via `enableAgentTools`, registering it with the MCP server and writing its MCP config and context files for the agents named in `agents`.
+- `list_service_versions` MCP tool — list the PHP, database, and web server versions available to `create_site`, flagging which are already installed versus downloaded on demand.
+- `site_status` now reports a `creationError` when a site created with `create_site` failed during provisioning.
+
 ## [0.2.1] - 2026-03-19
 
 ### Fixed
