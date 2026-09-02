@@ -9,9 +9,9 @@
 When you click "Enable" on a site in Local, the add-on:
 
 1. **Registers the site with the MCP server** — a single HTTP server running in Local's main process that gives AI tools access to WP-CLI, error logs, configuration, and site management
-2. **Writes MCP config** (`.mcp.json`, `.cursor/mcp.json`, etc.) — auto-configured with the correct HTTP endpoint for each agent
+2. **Writes MCP config** (`.mcp.json`, `.cursor/mcp.json`, etc.) — auto-configured with the correct HTTP endpoint and the per-install bearer token for each agent (see [Authentication](#authentication) below)
 3. **Generates project context** (`CLAUDE.md`, `.cursorrules`, etc.) — site context including PHP/MySQL versions, active plugins, theme, and file structure
-4. **Updates `.gitignore`** — so generated files aren't committed
+4. **Updates `.gitignore`** — the MCP config files now carry a secret (the bearer token) alongside the generated context files, so all of them are git-ignored and none are committed
 
 Then open the site folder in your AI tool of choice and you're ready to go.
 
@@ -26,6 +26,19 @@ http://localhost:{port}/sites/{siteId}/mcp
 The server uses the MCP Streamable HTTP transport. The port is stable across restarts (persisted at `~/.local-agent-tools/port`, default 24842).
 
 Sites remain registered even when stopped, so the MCP endpoint is always reachable. Tools that need running services (WP-CLI, database) return appropriate errors; file-based tools (config, logs, site info) work regardless. Config is refreshed on each tool call, so starting a site automatically makes database tools work without reconnecting.
+
+## Authentication
+
+Every request to the MCP server must present a per-install bearer token. The token is generated on first run, persisted at `~/.local-agent-tools/token` (mode `0600`) so it survives restarts, and written into each generated MCP config file both as an `Authorization: Bearer <token>` header and as a `?token=<token>` query parameter on the endpoint URL — legitimate clients authenticate automatically via either channel. The query parameter exists because some MCP clients don't reliably forward custom headers on every request (notably the SSE streaming connection), so the URL carries the same secret as a fallback; the header remains the primary channel. Because those config files (`.mcp.json`, `.cursor/mcp.json`, `.windsurf/mcp.json`, `.vscode/mcp.json`) now contain a secret, the add-on writes them with owner-only permissions and adds each to `.gitignore`.
+
+### Rotating the token
+
+To invalidate the current token (e.g. it leaked, or you no longer trust a machine that had it):
+
+1. Quit Local.
+2. Delete `~/.local-agent-tools/token`.
+3. Restart Local — a new token is generated automatically.
+4. Re-enable Agent Tools (or use "Regenerate config") on each site so its MCP config files pick up the new token.
 
 ## Supported Agents
 

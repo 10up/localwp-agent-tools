@@ -12,21 +12,14 @@ import {
 } from './helpers/paths';
 import { SiteConfig, SiteConfigRegistry } from './helpers/site-config';
 import { findAvailablePort, savePort, removePortFile, removePortFileSync } from './helpers/port';
+import { getOrCreateToken } from './helpers/auth';
+import { AgentTarget, MCP_SERVER_KEY, buildMcpServerEntry, mergeMcpConfig } from './helpers/mcp-config';
 import { createMcpHttpServer, startMcpHttpServer, stopMcpHttpServer, closeSessionsForSite } from './mcp-server';
 import { LocalApi } from './tools';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-/** The key we use inside any mcpServers/servers object to identify our entry */
-const MCP_SERVER_KEY = 'local-wp';
-
-/**
- * Supported coding agent targets.
- * Each defines where MCP config and project context live.
- */
-type AgentTarget = 'claude' | 'cursor' | 'windsurf' | 'vscode';
 
 interface AgentTargetConfig {
 	/** Label for UI display */
@@ -41,34 +34,43 @@ interface AgentTargetConfig {
 	gitignoreEntries: string[];
 }
 
+// MCP config paths are hoisted into named constants (rather than inlined in
+// AGENT_TARGETS below) so gitignoreEntries can reuse the exact same value —
+// every one of these files now carries a bearer token (see mergeMcpConfig)
+// and must stay git-ignored.
+const CLAUDE_MCP_CONFIG_PATH = '.mcp.json';
+const CURSOR_MCP_CONFIG_PATH = path.join('.cursor', 'mcp.json');
+const WINDSURF_MCP_CONFIG_PATH = path.join('.windsurf', 'mcp.json');
+const VSCODE_MCP_CONFIG_PATH = path.join('.vscode', 'mcp.json');
+
 const AGENT_TARGETS: Record<AgentTarget, AgentTargetConfig> = {
 	claude: {
 		label: 'Claude Code',
-		mcpConfigPath: '.mcp.json',
+		mcpConfigPath: CLAUDE_MCP_CONFIG_PATH,
 		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: 'CLAUDE.md',
-		gitignoreEntries: ['.mcp.json', 'CLAUDE.md'],
+		gitignoreEntries: [CLAUDE_MCP_CONFIG_PATH, 'CLAUDE.md'],
 	},
 	cursor: {
 		label: 'Cursor',
-		mcpConfigPath: path.join('.cursor', 'mcp.json'),
+		mcpConfigPath: CURSOR_MCP_CONFIG_PATH,
 		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: '.cursorrules',
-		gitignoreEntries: ['.cursorrules'],
+		gitignoreEntries: [CURSOR_MCP_CONFIG_PATH, '.cursorrules'],
 	},
 	windsurf: {
 		label: 'Windsurf',
-		mcpConfigPath: path.join('.windsurf', 'mcp.json'),
+		mcpConfigPath: WINDSURF_MCP_CONFIG_PATH,
 		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: '.windsurfrules',
-		gitignoreEntries: ['.windsurfrules'],
+		gitignoreEntries: [WINDSURF_MCP_CONFIG_PATH, '.windsurfrules'],
 	},
 	vscode: {
 		label: 'VS Code Copilot',
-		mcpConfigPath: path.join('.vscode', 'mcp.json'),
+		mcpConfigPath: VSCODE_MCP_CONFIG_PATH,
 		mcpConfigTopLevelKey: 'servers',
 		contextFilePath: path.join('.github', 'copilot-instructions.md'),
-		gitignoreEntries: [],
+		gitignoreEntries: [VSCODE_MCP_CONFIG_PATH],
 	},
 };
 
@@ -93,6 +95,7 @@ const CONTEXT_MARKER_END = '<!-- <<< Agent Tools -->';
 
 const siteConfigRegistry = new SiteConfigRegistry();
 let mcpServerPort = 0;
+let mcpAuthToken = '';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -179,60 +182,10 @@ async function buildSiteConfig(site: Local.Site): Promise<SiteConfig> {
 
 // ---------------------------------------------------------------------------
 // MCP Config — Per-Agent HTTP Format
+//
+// `buildMcpServerEntry` and `mergeMcpConfig` live in ./helpers/mcp-config —
+// they're pure (no Local runtime imports) so they can be unit tested there.
 // ---------------------------------------------------------------------------
-
-/**
- * Builds the MCP server entry for a specific agent.
- * Each agent has different JSON shapes for HTTP MCP servers.
- */
-function buildMcpServerEntry(agent: AgentTarget, port: number, siteId: string): Record<string, any> {
-	const url = `http://localhost:${port}/sites/${siteId}/mcp`;
-
-	switch (agent) {
-		case 'claude':
-			return { type: 'http', url };
-		case 'cursor':
-			return { url };
-		case 'windsurf':
-			return { serverUrl: url };
-		case 'vscode':
-			return { type: 'http', url };
-	}
-}
-
-/**
- * Safely merges our MCP server entry into an existing MCP config file.
- * Creates the file (and parent directories) if it doesn't exist.
- * Preserves all other entries in the file.
- */
-async function mergeMcpConfig(
-	configPath: string,
-	serverEntry: Record<string, any>,
-	topLevelKey: string,
-): Promise<void> {
-	let existing: any = {};
-
-	if (await fs.pathExists(configPath)) {
-		try {
-			existing = await fs.readJSON(configPath);
-		} catch {
-			// File exists but isn't valid JSON — back it up before overwriting
-			const backupPath = configPath + '.backup';
-			await fs.copy(configPath, backupPath);
-			console.warn(`[Agent Tools] Backed up invalid JSON at ${configPath} to ${backupPath}`);
-			existing = {};
-		}
-	}
-
-	if (!existing[topLevelKey] || typeof existing[topLevelKey] !== 'object') {
-		existing[topLevelKey] = {};
-	}
-
-	existing[topLevelKey][MCP_SERVER_KEY] = serverEntry;
-
-	await fs.ensureDir(path.dirname(configPath));
-	await fs.writeJSON(configPath, existing, { spaces: 2 });
-}
 
 /**
  * Removes our MCP server entry from a config file.
@@ -424,7 +377,7 @@ async function setupSite(site: Local.Site, notifier: any, projectDir: string, ag
 
 		// Write MCP config (HTTP format, per-agent shape)
 		const mcpConfigPath = path.join(projectPath, agentConfig.mcpConfigPath);
-		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
+		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id, mcpAuthToken);
 		await mergeMcpConfig(mcpConfigPath, serverEntry, agentConfig.mcpConfigTopLevelKey);
 
 		// Write project context
@@ -516,7 +469,7 @@ async function changeProjectDir(site: Local.Site, newProjectDir: string, notifie
 	for (const agent of agents) {
 		const agentConfig = AGENT_TARGETS[agent];
 
-		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
+		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id, mcpAuthToken);
 		await mergeMcpConfig(
 			path.join(newPath, agentConfig.mcpConfigPath),
 			serverEntry,
@@ -567,7 +520,7 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 		for (const agent of added) {
 			const agentConfig = AGENT_TARGETS[agent];
 
-			const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
+			const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id, mcpAuthToken);
 			await mergeMcpConfig(
 				path.join(projectPath, agentConfig.mcpConfigPath),
 				serverEntry,
@@ -612,7 +565,7 @@ async function regenerateConfig(site: Local.Site): Promise<void> {
 	for (const agent of agents) {
 		const agentConfig = AGENT_TARGETS[agent];
 
-		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
+		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id, mcpAuthToken);
 		await mergeMcpConfig(
 			path.join(projectPath, agentConfig.mcpConfigPath),
 			serverEntry,
@@ -749,7 +702,13 @@ export default function (context: LocalMain.AddonMainContext): void {
 	(async () => {
 		try {
 			mcpServerPort = await findAvailablePort();
-			httpServer = createMcpHttpServer({ registry: siteConfigRegistry, localApi });
+			mcpAuthToken = await getOrCreateToken();
+			httpServer = createMcpHttpServer({
+				registry: siteConfigRegistry,
+				localApi,
+				authToken: mcpAuthToken,
+				port: mcpServerPort,
+			});
 
 			try {
 				await startMcpHttpServer(httpServer, mcpServerPort);
@@ -760,7 +719,12 @@ export default function (context: LocalMain.AddonMainContext): void {
 				if (code === 'EADDRINUSE') {
 					console.warn(`[Agent Tools] Port ${mcpServerPort} was taken, retrying with ${mcpServerPort + 1}`);
 					mcpServerPort += 1;
-					httpServer = createMcpHttpServer({ registry: siteConfigRegistry, localApi });
+					httpServer = createMcpHttpServer({
+						registry: siteConfigRegistry,
+						localApi,
+						authToken: mcpAuthToken,
+						port: mcpServerPort,
+					});
 					await startMcpHttpServer(httpServer, mcpServerPort);
 				} else {
 					throw listenErr;
@@ -800,6 +764,10 @@ export default function (context: LocalMain.AddonMainContext): void {
 				// Best-effort — process is exiting, no time to await
 				stopMcpHttpServer(httpServer);
 			}
+			// Port has a default fallback if the file is missing, so it's safe to
+			// clear on quit. The token has no such fallback: deleting it here would
+			// force every generated MCP config (which embeds the token) to go stale
+			// on every restart. The token is meant to persist across restarts.
 			removePortFileSync();
 		} catch {
 			// Best-effort cleanup

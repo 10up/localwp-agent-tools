@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file, per [the Ke
 
 ## [Unreleased]
 
+### Security
+
+- Require a per-install bearer token (`~/.local-agent-tools/token`, mode `0600`, checked in constant time) on every MCP HTTP request, closing an unauthenticated-RCE path via `wp_cli` and full `wp-config.php` secret disclosure via `read_wp_config` on `127.0.0.1:{port}`.
+- Validate `Host` and `Origin` headers against a strict loopback allowlist (rejecting userinfo/path/fragment/query smuggling in `Host`, e.g. `evil.com@localhost`) to defeat DNS-rebinding, independent of the MCP SDK's own protection.
+- Persist the bearer token across app restarts instead of deleting it on quit, and write every generated MCP config file (`.mcp.json`, `.cursor/mcp.json`, `.windsurf/mcp.json`, `.vscode/mcp.json`) with owner-only (`0600`) permissions, git-ignoring all of them since they now embed the token.
+- Match the `Bearer` auth scheme case-insensitively per RFC 7235, and refuse to start the MCP HTTP server with an empty auth token.
+- Accept the bearer token from a `?token=` query parameter as a fallback auth channel (in addition to the `Authorization` header) and embed it in generated config URLs, since some MCP clients don't forward custom headers on every request, notably the SSE GET stream.
+
 ## [0.2.1] - 2026-03-19
 
 ### Fixed

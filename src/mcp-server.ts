@@ -1,5 +1,5 @@
 import * as http from 'http';
-import { randomUUID } from 'crypto';
+import { randomUUID, timingSafeEqual } from 'crypto';
 import { SiteConfigRegistry } from './helpers/site-config';
 import { allToolDefinitions, handleToolCall, LocalApi } from './tools';
 
@@ -40,6 +40,10 @@ interface SessionEntry {
 interface McpHttpServerOptions {
 	registry: SiteConfigRegistry;
 	localApi: LocalApi;
+	/** Per-install bearer token; every request must present `Authorization: Bearer <authToken>`. */
+	authToken: string;
+	/** Port the server is bound to — used to scope DNS-rebinding allowlists to this instance. */
+	port: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,21 +199,140 @@ function parseSiteId(url: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Auth & DNS-Rebinding Protection
+// ---------------------------------------------------------------------------
+
+/** Hostnames we accept on Host/Origin headers — this server only ever binds to 127.0.0.1. */
+const ALLOWED_HOSTNAMES = new Set(['127.0.0.1', 'localhost']);
+
+/**
+ * Constant-time comparison of a candidate token against the expected one, so
+ * response timing can't be used to guess the token byte-by-byte. Guards
+ * length first since `timingSafeEqual` throws on mismatched buffer lengths.
+ */
+function tokenMatches(candidate: string | null, expected: string): boolean {
+	if (candidate === null) return false;
+
+	const provided = Buffer.from(candidate, 'utf-8');
+	const expectedBuf = Buffer.from(expected, 'utf-8');
+
+	if (provided.length !== expectedBuf.length) return false;
+
+	return timingSafeEqual(provided, expectedBuf);
+}
+
+/**
+ * Verifies the request carries our per-install token, via either channel:
+ *  - `Authorization: Bearer <authToken>` header (primary — checked first)
+ *  - `?token=<authToken>` query parameter (fallback — for MCP clients that
+ *    don't forward custom headers on every request, notably the SSE GET
+ *    stream some clients open without re-sending Authorization)
+ * Either channel matching is sufficient; both are compared in constant time.
+ */
+function isAuthorized(req: http.IncomingMessage, authToken: string): boolean {
+	const header = req.headers['authorization'];
+	if (typeof header === 'string') {
+		// RFC 7235: the auth-scheme token ("Bearer") is case-insensitive, so match
+		// it case-insensitively — but slice the token itself off the *original*
+		// header so we never alter the token bytes we're about to compare.
+		if (header.slice(0, 7).toLowerCase() === 'bearer ' && tokenMatches(header.slice(7), authToken)) {
+			return true;
+		}
+	}
+
+	// Fallback: same token, carried as a URL query parameter. Parsed from
+	// req.url only to read `token` — routing still strips the query string
+	// separately (see `parseSiteId` callsite) and never consults this value.
+	const queryToken = new URL(req.url ?? '', 'http://127.0.0.1').searchParams.get('token');
+	return tokenMatches(queryToken, authToken);
+}
+
+/** Characters with no meaning in a bare `Host` header — their presence only
+ * indicates an attempt to smuggle a second hostname past a naive parser
+ * (e.g. `evil.com@localhost`, `localhost/evil.com`). */
+const HOST_HEADER_FORBIDDEN_CHARS = /[@/#?\s]/;
+
+/**
+ * Extracts the hostname from a `Host` header value. Per RFC 7230 this is a
+ * bare `host[:port]` — never a full URL — so we parse it strictly instead of
+ * handing it to `new URL()`, which would silently tolerate userinfo, path,
+ * fragment, and query components that don't belong in a Host header.
+ */
+function extractHostnameFromHostHeader(headerValue: string | undefined): string | null {
+	if (!headerValue) return null;
+	if (HOST_HEADER_FORBIDDEN_CHARS.test(headerValue)) return null;
+
+	// Bracketed IPv6 literals (e.g. `[::1]:24842`) aren't in our loopback
+	// allowlist anyway, so reject outright rather than parsing further.
+	if (headerValue.startsWith('[')) return null;
+
+	const lastColon = headerValue.lastIndexOf(':');
+	return lastColon === -1 ? headerValue : headerValue.slice(0, lastColon);
+}
+
+/** Extracts the hostname from a full `Origin` URL (e.g. `http://localhost:1234`). */
+function extractHostnameFromOrigin(headerValue: string | undefined): string | null {
+	if (!headerValue) return null;
+	try {
+		return new URL(headerValue).hostname;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Defeats DNS-rebinding attacks: rejects any request whose Host header (and
+ * Origin header, when present) doesn't resolve to one of our loopback names.
+ * This check is independent of the SDK's own DNS-rebinding protection so it
+ * holds regardless of transport internals.
+ */
+function isAllowedHost(req: http.IncomingMessage): boolean {
+	const hostname = extractHostnameFromHostHeader(req.headers.host);
+	if (!hostname || !ALLOWED_HOSTNAMES.has(hostname)) return false;
+
+	const origin = req.headers.origin;
+	if (origin) {
+		const originHostname = extractHostnameFromOrigin(origin);
+		if (!originHostname || !ALLOWED_HOSTNAMES.has(originHostname)) return false;
+	}
+
+	return true;
+}
+
+// ---------------------------------------------------------------------------
 // HTTP Server
 // ---------------------------------------------------------------------------
 
 export function createMcpHttpServer(options: McpHttpServerOptions): http.Server {
-	const { registry, localApi } = options;
+	const { registry, localApi, authToken, port } = options;
+
+	// An empty token would make isAuthorized's length check pass for an empty
+	// (or missing-but-coerced-empty) Authorization value — never let a server
+	// come up in a state where it can't actually enforce auth.
+	if (!authToken) throw new Error('createMcpHttpServer requires a non-empty authToken');
 
 	const httpServer = http.createServer(async (req, res) => {
+		// Auth: every request must present our per-install bearer token.
+		if (!isAuthorized(req, authToken)) {
+			res.writeHead(401, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Unauthorized' }));
+			return;
+		}
+
+		// DNS-rebinding protection: Host (and Origin, if present) must be loopback.
+		if (!isAllowedHost(req)) {
+			res.writeHead(403, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Forbidden host' }));
+			return;
+		}
+
 		const url = (req.url || '').split('?')[0]; // strip query string
 		const method = req.method || 'GET';
 
-		// Health check
+		// Health check — no siteId enumeration; auth is already enforced above.
 		if (url === '/health' && method === 'GET') {
-			const sites = registry.getAllIds();
 			res.writeHead(200, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({ status: 'ok', sites, activeSessions: sessions.size }));
+			res.end(JSON.stringify({ status: 'ok', activeSessions: sessions.size }));
 			return;
 		}
 
@@ -295,6 +418,12 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 				const transport = new StreamableHTTPServerTransport({
 					sessionIdGenerator: () => randomUUID(),
 					enableJsonResponse: true,
+					// Defense-in-depth: the top-level Host/Origin check above is the real
+					// fix and applies regardless of transport internals; this lets the SDK
+					// enforce the same loopback-only policy for this instance's exact port.
+					enableDnsRebindingProtection: true,
+					allowedHosts: [`127.0.0.1:${port}`, `localhost:${port}`],
+					allowedOrigins: [`http://127.0.0.1:${port}`, `http://localhost:${port}`],
 					onsessioninitialized: (newSessionId: string) => {
 						sessions.set(newSessionId, {
 							transport,
