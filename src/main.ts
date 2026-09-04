@@ -588,13 +588,15 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 }
 
 /**
- * Rewrites the MCP config file (config only — no context file, no
- * .gitignore) for each of the site's configured agents, using the current
- * in-memory port and auth token. This is the one piece of regenerateConfig()
- * that the startup migration below also needs, factored out so the startup
- * loop doesn't also re-touch context files on every restart.
+ * Rewrites the MCP config file (config only — no context file) for each of
+ * the site's configured agents, using the current in-memory port and auth
+ * token. Shared by regenerateConfig() and the startup loop below, factored
+ * out so the startup loop doesn't also re-touch context files on every
+ * restart.
  */
 async function writeMcpConfigsForSite(site: Local.Site, projectPath: string, agents: AgentTarget[]): Promise<void> {
+	requireAuthToken();
+
 	for (const agent of agents) {
 		const agentConfig = AGENT_TARGETS[agent];
 
@@ -629,6 +631,8 @@ async function regenerateConfig(site: Local.Site): Promise<void> {
 
 		await writeContextFile(path.join(projectPath, agentConfig.contextFilePath), contextContent, agent);
 	}
+
+	await updateGitignore(projectPath, agents);
 }
 
 async function getStatus(site: Local.Site): Promise<AgentToolsStatus> {
@@ -1028,13 +1032,13 @@ export default function (context: LocalMain.AddonMainContext): void {
 							continue;
 						}
 
-						// Upgrade path: installs from before the auth token existed wrote
-						// MCP configs with no Authorization header, so every one of those
-						// configs would get a bare 401 on the first request after
-						// upgrading. Rewrite each enabled site's MCP config files now,
-						// with the token this run just created/loaded, so upgrading
-						// requires no manual step. Config files only — deliberately does
-						// not touch .gitignore or context files here.
+						// Runs on every Local start: rewrite each enabled site's MCP
+						// config with this run's port and token, and refresh the ignore
+						// block so the token-bearing config files stay untracked. Running
+						// unconditionally is also what makes it the upgrade path from
+						// versions that wrote configs with no Authorization header — and
+						// ignore blocks with no per-agent config paths — so upgrading
+						// needs no manual step. Context files are deliberately untouched.
 						try {
 							const sitePath = getSitePath(site);
 							const projectDir = getStoredProjectDir(site);
@@ -1042,7 +1046,8 @@ export default function (context: LocalMain.AddonMainContext): void {
 							const agents = getStoredAgents(site);
 
 							await writeMcpConfigsForSite(site, projectPath, agents);
-							console.log(`[Agent Tools] Rewrote MCP config for site ${site.name}`);
+							await updateGitignore(projectPath, agents);
+							console.log(`[Agent Tools] Rewrote MCP config and .gitignore for site ${site.name}`);
 						} catch (err) {
 							console.warn(`[Agent Tools] Failed to rewrite MCP config for site ${site.name}:`, err);
 						}
