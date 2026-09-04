@@ -282,6 +282,8 @@ exports[`Tool definitions snapshot > tool descriptions match snapshot 1`] = `
 
 Plugins and themes are loaded by default so plugin-provided commands (e.g. "elasticpress stats", "acf", "redis") work. If a specific plugin or theme is fatally erroring, pass "--skip-plugins=<slug>" / "--skip-themes=<slug>" (or the bare flags to skip all) to bypass it.
 
+BLOCKED: "eval", "eval-file", "shell", "db drop", "db reset", "db import", "site empty", "site delete", and the "--exec" / "--require" / "--ssh" / "--http" global flags are always rejected, even behind a leading flag like "--skip-plugins".
+
 WARNING: Some WP-CLI commands are destructive and should only be run after confirming with the user:
 - "eval" / "eval-file" / "shell" — execute arbitrary PHP code
 - "db drop" / "db reset" — destroy the database

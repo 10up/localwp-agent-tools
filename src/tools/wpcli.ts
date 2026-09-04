@@ -21,9 +21,31 @@ const BLOCKED_COMMANDS: string[][] = [
 	['site', 'delete'],
 ];
 
+/**
+ * WP-CLI global flags that run PHP directly or proxy the command to another
+ * host. Blocked no matter where they appear in the argument list — unlike
+ * BLOCKED_COMMANDS, which only matches at the start of the command.
+ */
+const BLOCKED_GLOBAL_FLAGS = ['--exec', '--require', '--ssh', '--http'];
+
 export function isBlockedCommand(args: string[]): string | null {
+	for (const arg of args) {
+		const lower = arg.toLowerCase();
+		for (const flag of BLOCKED_GLOBAL_FLAGS) {
+			if (lower === flag || lower.startsWith(`${flag}=`)) {
+				return flag;
+			}
+		}
+	}
+
+	// Global flags (e.g. "--skip-plugins") can precede the actual command,
+	// which would otherwise shift BLOCKED_COMMANDS out of alignment. Match
+	// starting at the first arg that isn't itself a leading flag.
+	const startIndex = args.findIndex((arg) => !arg.startsWith('--'));
+	if (startIndex === -1) return null;
+
 	for (const blocked of BLOCKED_COMMANDS) {
-		if (blocked.every((part, i) => args[i]?.toLowerCase() === part)) {
+		if (blocked.every((part, i) => args[startIndex + i]?.toLowerCase() === part)) {
 			return blocked.join(' ');
 		}
 	}
@@ -82,6 +104,7 @@ export const toolDefinitions = [
 		description:
 			'Run an arbitrary WP-CLI command. Pass arguments without the leading "wp" prefix. Example: args="post list --post_type=page --format=json"\n\n' +
 			'Plugins and themes are loaded by default so plugin-provided commands (e.g. "elasticpress stats", "acf", "redis") work. If a specific plugin or theme is fatally erroring, pass "--skip-plugins=<slug>" / "--skip-themes=<slug>" (or the bare flags to skip all) to bypass it.\n\n' +
+			'BLOCKED: "eval", "eval-file", "shell", "db drop", "db reset", "db import", "site empty", "site delete", and the "--exec" / "--require" / "--ssh" / "--http" global flags are always rejected, even behind a leading flag like "--skip-plugins".\n\n' +
 			'WARNING: Some WP-CLI commands are destructive and should only be run after confirming with the user:\n' +
 			'- "eval" / "eval-file" / "shell" — execute arbitrary PHP code\n' +
 			'- "db drop" / "db reset" — destroy the database\n' +
