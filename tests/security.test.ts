@@ -82,8 +82,21 @@ describe('Security: tool descriptions warn about destructive commands', () => {
 });
 
 describe('Security: tool definitions do not expose credentials', () => {
+	// create_site sets the WordPress admin credentials for a site that does not exist
+	// yet, so it necessarily talks about passwords. Every other tool operates on an
+	// existing site and must never surface that site's credentials.
+	const CREDENTIAL_SETTING_TOOLS = ['create_site'];
+
+	it('only create_site is exempt from the credential check', () => {
+		const names = allToolDefinitions.map((t) => t.name);
+		for (const exempt of CREDENTIAL_SETTING_TOOLS) {
+			expect(names).toContain(exempt);
+		}
+	});
+
 	it('no tool description contains password', () => {
 		for (const tool of allToolDefinitions) {
+			if (CREDENTIAL_SETTING_TOOLS.includes(tool.name)) continue;
 			const desc = tool.description.toLowerCase();
 			expect(desc).not.toContain('password');
 			const props = tool.inputSchema.properties || {};
