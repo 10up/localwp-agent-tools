@@ -176,6 +176,102 @@ exports[`Tool definitions snapshot > matches the expected tool API surface 1`] =
     },
     "name": "list_sites",
   },
+  {
+    "inputSchema": {
+      "properties": {},
+      "type": "object",
+    },
+    "name": "list_service_versions",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "agents": {
+          "description": "Which agents to configure when enableAgentTools is true. Optional — defaults to ["claude"].",
+          "items": {
+            "enum": [
+              "claude",
+              "cursor",
+              "windsurf",
+              "vscode",
+            ],
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "database": {
+          "description": "Database service as "<name>-<version>", e.g. "mysql-8.4.0" or "mariadb-10.6.23". Optional — see list_service_versions.",
+          "type": "string",
+        },
+        "domain": {
+          "description": "Local domain for the site. Optional — defaults to the slugified name plus the configured TLD, e.g. "my-test-site.local".",
+          "type": "string",
+        },
+        "enableAgentTools": {
+          "description": "Enable Agent Tools on the new site once it is ready, registering it with this MCP server and writing its MCP config and project context files. Optional — defaults to false.",
+          "type": "boolean",
+        },
+        "multisite": {
+          "description": "WordPress multisite mode. Optional — defaults to "none".",
+          "enum": [
+            "none",
+            "subdirectory",
+            "subdomain",
+          ],
+          "type": "string",
+        },
+        "name": {
+          "description": "Display name for the site, e.g. "My Test Site".",
+          "type": "string",
+        },
+        "path": {
+          "description": "Absolute path for the site folder. Optional — defaults to the slugified name inside Local's configured sites directory. Must not be an existing site folder.",
+          "type": "string",
+        },
+        "phpVersion": {
+          "description": "PHP version, e.g. "8.2.29". Optional — see list_service_versions.",
+          "type": "string",
+        },
+        "siteLanguage": {
+          "description": "WordPress locale, e.g. "en_US". Optional — defaults to Local's configured language.",
+          "type": "string",
+        },
+        "skipWordPressInstall": {
+          "description": "Provision the site but skip installing WordPress, leaving an empty web root. Optional — defaults to false.",
+          "type": "boolean",
+        },
+        "wait": {
+          "description": "Block until provisioning and the WordPress install finish. Optional — defaults to false. Only set this if your MCP client tolerates multi-minute tool calls.",
+          "type": "boolean",
+        },
+        "webServer": {
+          "description": "Web server as "<name>-<version>", e.g. "nginx-1.26.1". Optional — see list_service_versions.",
+          "type": "string",
+        },
+        "wpAdminEmail": {
+          "description": "WordPress admin email. Optional — defaults to Local's configured admin email.",
+          "type": "string",
+        },
+        "wpAdminPassword": {
+          "description": "WordPress admin password. Optional — defaults to "admin".",
+          "type": "string",
+        },
+        "wpAdminUsername": {
+          "description": "WordPress admin username. Optional — defaults to "admin".",
+          "type": "string",
+        },
+        "xdebugEnabled": {
+          "description": "Enable Xdebug on the new site. Optional — defaults to false.",
+          "type": "boolean",
+        },
+      },
+      "required": [
+        "name",
+      ],
+      "type": "object",
+    },
+    "name": "create_site",
+  },
 ]
 `;
 
@@ -237,12 +333,20 @@ Always confirm with the user before running these commands.",
     "name": "site_restart",
   },
   {
-    "description": "Get the current status (running, halted, etc.) of a Local site. If siteId is omitted, operates on the current site.",
+    "description": "Get the current status (running, halted, etc.) of a Local site. If siteId is omitted, operates on the current site. Use this to poll a site created with create_site; a creationError field appears if provisioning that site failed.",
     "name": "site_status",
   },
   {
     "description": "List all Local sites with their ID, name, domain, path, and current status.",
     "name": "list_sites",
+  },
+  {
+    "description": "List the PHP, database, and web server versions available for a new Local site. Use this before create_site to pick valid phpVersion / database / webServer values. Versions marked installed:false are downloaded on demand, which makes creation slower.",
+    "name": "list_service_versions",
+  },
+  {
+    "description": "Create a new WordPress site in Local. Provisions the site services and installs WordPress. Returns as soon as the site exists (usually within a second) — provisioning continues in the background and typically takes one to several minutes, longer when service binaries must be downloaded first. Poll site_status with the returned id until it reports "running". Pass wait:true to block until the site is fully ready instead. Note: unless Local is set to localhost router mode, Local will prompt the user for their administrator password to update /etc/hosts partway through.",
+    "name": "create_site",
   },
 ]
 `;

@@ -28,6 +28,24 @@ const mockLocalApi: LocalApi = {
 	restartSite: async () => ({ id: 'test', status: 'running' }),
 	getSiteStatus: async () => ({ id: 'test', status: 'running' }),
 	listSites: async () => [],
+	createSite: async (opts) => ({
+		id: 'new-site',
+		name: opts.name,
+		domain: 'new-site.local',
+		path: '/tmp/new-site',
+		url: 'http://new-site.local',
+		status: 'adding',
+		phpVersion: '8.2.29',
+		database: 'mysql-8.4.0',
+		webServer: 'nginx-1.26.1',
+		multisite: 'none',
+		wpAdminUsername: 'admin',
+		wpAdminPassword: 'admin',
+		wpAdminEmail: 'dev-email@wpengine.local',
+		agentToolsEnabled: false,
+		pending: true,
+	}),
+	listServiceVersions: async () => ({ php: [], database: [], webServer: [], note: '' }),
 };
 
 describe('allToolDefinitions', () => {
@@ -40,6 +58,8 @@ describe('allToolDefinitions', () => {
 		expect(names).toContain('get_site_info');
 		expect(names).toContain('site_start');
 		expect(names).toContain('list_sites');
+		expect(names).toContain('create_site');
+		expect(names).toContain('list_service_versions');
 	});
 
 	it('each tool has name, description, and inputSchema', () => {
