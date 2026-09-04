@@ -64,6 +64,26 @@ describe('isBlockedCommand: leading-flag bypass', () => {
 	it('allows a safe command followed by a flag', () => {
 		expect(isBlockedCommand(splitArgs('plugin list --skip-plugins'))).toBeNull();
 	});
+
+	it('blocks a blocked command preceded by a single-dash flag', () => {
+		expect(isBlockedCommand(splitArgs("- eval 'x'"))).toBe('eval');
+	});
+
+	it('blocks a blocked command preceded by a short flag', () => {
+		expect(isBlockedCommand(splitArgs("-x eval 'x'"))).toBe('eval');
+	});
+
+	it('still blocks a blocked command preceded by a literal "--" separator', () => {
+		expect(isBlockedCommand(splitArgs("-- eval 'x'"))).toBe('eval');
+	});
+
+	it('blocks a blocked command behind mixed leading flags', () => {
+		expect(isBlockedCommand(splitArgs('--skip-plugins -x db drop'))).toBe('db drop');
+	});
+
+	it('allows an args list that is only flags', () => {
+		expect(isBlockedCommand(splitArgs('--skip-plugins --debug'))).toBeNull();
+	});
 });
 
 describe('isBlockedCommand: dangerous global flags', () => {

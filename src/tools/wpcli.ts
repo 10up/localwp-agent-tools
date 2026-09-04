@@ -38,10 +38,13 @@ export function isBlockedCommand(args: string[]): string | null {
 		}
 	}
 
-	// Global flags (e.g. "--skip-plugins") can precede the actual command,
-	// which would otherwise shift BLOCKED_COMMANDS out of alignment. Match
-	// starting at the first arg that isn't itself a leading flag.
-	const startIndex = args.findIndex((arg) => !arg.startsWith('--'));
+	// Global flags (e.g. "--skip-plugins", "-x", or a single "-") can precede
+	// the actual command, which would otherwise shift BLOCKED_COMMANDS out of
+	// alignment. Match starting at the first arg that isn't itself a leading
+	// flag — i.e. doesn't start with "-" at all, single- or double-dash alike.
+	// ("--" still starts with "-", so a blocked command after a literal "--"
+	// separator is still matched.)
+	const startIndex = args.findIndex((arg) => !arg.startsWith('-'));
 	if (startIndex === -1) return null;
 
 	for (const blocked of BLOCKED_COMMANDS) {
