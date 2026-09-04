@@ -77,6 +77,11 @@ exports[`Tool definitions snapshot > matches the expected tool API surface 1`] =
   {
     "inputSchema": {
       "properties": {
+        "includeSecrets": {
+          "default": false,
+          "description": "Return real values for secrets. Default false redacts them.",
+          "type": "boolean",
+        },
         "raw": {
           "default": false,
           "description": "If true, return the raw file content instead of parsed constants. Default false.",
@@ -307,7 +312,7 @@ Always confirm with the user before running these commands.",
     "name": "wp_debug_toggle",
   },
   {
-    "description": "Read and parse wp-config.php, extracting all define() constants and their values. Also shows the database table prefix.",
+    "description": "Read and parse wp-config.php, extracting all define() constants and their values. Also shows the database table prefix. Secrets — database credentials and any constant ending in _KEY or _SALT, or starting with NONCE_ — are redacted by default; pass includeSecrets: true to see real values.",
     "name": "read_wp_config",
   },
   {
