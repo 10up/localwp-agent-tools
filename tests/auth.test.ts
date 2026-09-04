@@ -355,6 +355,10 @@ describe('MCP HTTP Server: bearer auth + DNS-rebinding protection', () => {
 			['Host: evil.com@localhost:{port}', 403, (p) => ({ Host: `evil.com@localhost:${p}` })],
 			['Origin: null', 403, () => ({ Origin: 'null' })],
 			['Origin: http://evil.com', 403, () => ({ Origin: 'http://evil.com' })],
+			// `Origin:` with an empty value is a header the client chose to
+			// send, not the absent header on the row below — a truthiness check
+			// on the header value would wave it through.
+			['Origin: (present but empty)', 403, () => ({ Origin: '' })],
 			['no Origin header', 200, () => ({})],
 			['Origin: http://127.0.0.1:9999 (wrong port)', 403, () => ({ Origin: 'http://127.0.0.1:9999' })],
 			[

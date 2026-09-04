@@ -219,9 +219,7 @@ function buildAllowedHosts(port: number): string[] {
  * response timing can't be used to guess the token byte-by-byte. Guards
  * length first since `timingSafeEqual` throws on mismatched buffer lengths.
  */
-function tokenMatches(candidate: string | null, expected: string): boolean {
-	if (candidate === null) return false;
-
+function tokenMatches(candidate: string, expected: string): boolean {
 	const provided = Buffer.from(candidate, 'utf-8');
 	const expectedBuf = Buffer.from(expected, 'utf-8');
 
@@ -259,8 +257,10 @@ const HOST_HEADER_FORBIDDEN_CHARS = /[@/#?\s]/;
 /**
  * Defeats DNS-rebinding attacks: rejects any request whose Host header — and
  * Origin header, when it carries one — isn't exactly one of this instance's
- * loopback entries. A request with no Origin at all passes; MCP clients aren't
- * browsers and don't send one.
+ * loopback entries. Only a request with no Origin header at all passes;
+ * MCP clients aren't browsers and don't send one. A header that is present
+ * but empty is not "no Origin": nothing legitimate sends one, so it is
+ * rejected like any other non-loopback value.
  *
  * The compare is byte-exact: no case folding, no trailing-dot handling, and
  * the Origin's scheme counts. A real client builds its Host header from the
@@ -290,8 +290,11 @@ function isAllowedHost(
 
 	if (!allowedHosts.includes(host)) return false;
 
+	// `!== undefined`, not a truthiness check: `Origin:` with an empty value is
+	// a header the client chose to send, so it has to clear the allowlist like
+	// any other value. Only an absent header skips the compare.
 	const origin = req.headers.origin;
-	if (origin && !allowedOrigins.includes(origin)) return false;
+	if (origin !== undefined && !allowedOrigins.includes(origin)) return false;
 
 	return true;
 }
