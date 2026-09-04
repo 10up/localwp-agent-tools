@@ -29,16 +29,41 @@ Sites remain registered even when stopped, so the MCP endpoint is always reachab
 
 ## Authentication
 
-Every request to the MCP server must present a per-install bearer token. The token is generated on first run, persisted at `~/.local-agent-tools/token` (mode `0600`) so it survives restarts, and written into each generated MCP config file both as an `Authorization: Bearer <token>` header and as a `?token=<token>` query parameter on the endpoint URL — legitimate clients authenticate automatically via either channel. The query parameter exists because some MCP clients don't reliably forward custom headers on every request (notably the SSE streaming connection), so the URL carries the same secret as a fallback; the header remains the primary channel. Because those config files (`.mcp.json`, `.cursor/mcp.json`, `.windsurf/mcp.json`, `.vscode/mcp.json`) now contain a secret, the add-on writes them with owner-only permissions and adds each to `.gitignore`.
+Every request to the MCP server needs an `Authorization: Bearer <token>` header. That header is the only channel; there is no `?token=` URL parameter.
+
+The add-on creates the token on first start and stores it at `~/.local-agent-tools/token`, with mode `0600` in a `0700` directory. The token survives restarts, and the server checks it in constant time.
+
+The token lives in a `headers` field inside each generated MCP config file: `.mcp.json`, `.cursor/mcp.json`, `.windsurf/mcp.json`, and `.vscode/mcp.json`. Each of those files is written with mode `0600`, and each file, plus its `.backup` copy, is added to the project's `.gitignore`. The add-on refreshes that `.gitignore` block every time it rewrites the config files, including on startup.
+
+### Upgrading from 0.2.1 or earlier
+
+Restart Local once. On start, the add-on rewrites the MCP config file for every enabled site with the current token, so no manual step is needed.
+
+Then restart your MCP client so it picks up the new config. If a client still gets a 401 response, open the site in Local's Agent Tools panel and click **Regenerate Config**.
 
 ### Rotating the token
 
-To invalidate the current token (e.g. it leaked, or you no longer trust a machine that had it):
+To replace the current token:
 
 1. Quit Local.
 2. Delete `~/.local-agent-tools/token`.
-3. Restart Local — a new token is generated automatically.
-4. Re-enable Agent Tools (or use "Regenerate config") on each site so its MCP config files pick up the new token.
+3. Start Local.
+
+The add-on generates a new token on start and rewrites every enabled site's MCP config files with it.
+
+### What the token does not protect against
+
+A process running as the same user as Local can read the token file and every MCP config file that carries it. The token stops other users, other machines, and web pages from reaching the MCP server. It does not stop another process running under your own account.
+
+Treat the MCP server as trusted-local: safe from the network and from other accounts on the machine, but not from other software running as you.
+
+### Install location
+
+Local lets you choose where the add-on writes its project files: Site Root, WordPress Root (`app/public`), or `wp-content`. Choosing WordPress Root or `wp-content` puts the MCP config file, and the token inside it, in the site's web root, where Local's web server can serve it. Prefer Site Root unless you need one of the other locations.
+
+### Host and Origin
+
+The server only answers requests whose `Host` header is exactly `localhost:{port}` or `127.0.0.1:{port}`. A hand-written MCP config must use one of those two values.
 
 ## Supported Agents
 
@@ -49,25 +74,25 @@ To invalidate the current token (e.g. it leaked, or you no longer trust a machin
 | Windsurf        | `.windsurf/mcp.json` | `.windsurfrules`                  |
 | VS Code Copilot | `.vscode/mcp.json`   | `.github/copilot-instructions.md` |
 
-## MCP Tools (14 total)
+## MCP Tools (15 total)
 
-| Category        | Tools                   | Description                                                                                                |
-| --------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **WP-CLI**      | `wp_cli`                | Run any WP-CLI command (database queries, imports, exports, search-replace, plugin/theme management, etc.) |
-| **Logs**        | `read_error_log`        | Read and parse the PHP error log                                                                           |
-|                 | `read_access_log`       | Read the nginx access log                                                                                  |
-|                 | `wp_debug_toggle`       | Enable/disable WP_DEBUG, WP_DEBUG_LOG, and SCRIPT_DEBUG                                                    |
-| **Config**      | `read_wp_config`        | Parse wp-config.php constants and table prefix                                                             |
-|                 | `edit_wp_config`        | Add or modify a wp-config.php constant (with backup)                                                       |
-| **Site**        | `get_site_info`         | Paths, URLs, database config, PHP/WP versions, active plugins and theme                                    |
-|                 | `site_health_check`     | Database connectivity, file permissions, WP_DEBUG status, log sizes, PHP version                           |
-| **Environment** | `site_start`            | Start a site's services (PHP, MySQL, web server)                                                           |
-|                 | `site_stop`             | Stop a site's services                                                                                     |
-|                 | `site_restart`          | Restart a site's services                                                                                  |
-|                 | `site_status`           | Get current status of a site                                                                               |
-|                 | `list_sites`            | List all Local sites with status                                                                           |
-|                 | `create_site`           | Create a new WordPress site in Local, optionally enabling Agent Tools on it                                |
-|                 | `list_service_versions` | PHP, database, and web server versions available to `create_site`                                          |
+| Category        | Tools                   | Description                                                                                                                                                                                                                          |
+| --------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **WP-CLI**      | `wp_cli`                | Run any WP-CLI command (database queries, imports, exports, search-replace, plugin/theme management, etc.); blocks destructive commands plus the `--exec`, `--require`, `--ssh`, and `--http` global flags anywhere in the arguments |
+| **Logs**        | `read_error_log`        | Read and parse the PHP error log                                                                                                                                                                                                     |
+|                 | `read_access_log`       | Read the nginx access log                                                                                                                                                                                                            |
+|                 | `wp_debug_toggle`       | Enable/disable WP_DEBUG, WP_DEBUG_LOG, and SCRIPT_DEBUG                                                                                                                                                                              |
+| **Config**      | `read_wp_config`        | Parse wp-config.php constants and table prefix; secrets are shown as `[redacted]` by default; `raw: true` requires `includeSecrets: true`                                                                                            |
+|                 | `edit_wp_config`        | Add or modify a wp-config.php constant (with backup)                                                                                                                                                                                 |
+| **Site**        | `get_site_info`         | Paths, URLs, database config, PHP/WP versions, active plugins and theme                                                                                                                                                              |
+|                 | `site_health_check`     | Database connectivity, file permissions, WP_DEBUG status, log sizes, PHP version                                                                                                                                                     |
+| **Environment** | `site_start`            | Start a site's services (PHP, MySQL, web server)                                                                                                                                                                                     |
+|                 | `site_stop`             | Stop a site's services                                                                                                                                                                                                               |
+|                 | `site_restart`          | Restart a site's services                                                                                                                                                                                                            |
+|                 | `site_status`           | Get current status of a site                                                                                                                                                                                                         |
+|                 | `list_sites`            | List all Local sites with status                                                                                                                                                                                                     |
+|                 | `create_site`           | Create a new WordPress site in Local, optionally enabling Agent Tools on it                                                                                                                                                          |
+|                 | `list_service_versions` | PHP, database, and web server versions available to `create_site`                                                                                                                                                                    |
 
 ### Creating sites
 
