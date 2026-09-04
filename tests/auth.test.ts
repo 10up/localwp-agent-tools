@@ -334,4 +334,103 @@ describe('MCP HTTP Server: bearer auth + DNS-rebinding protection', () => {
 			expect(res.statusCode).toBe(401);
 		});
 	});
+
+	// Both rebinding layers — our own Host/Origin gate and the SDK's
+	// `allowedHosts`/`allowedOrigins` on the transport — have to accept and
+	// reject the same set. They do the same exact compare against the same two
+	// lists, so agreement should be automatic; every row proves it by running
+	// against a route that never touches the transport (`/health`) and a route
+	// that goes all the way through it (an MCP `initialize`).
+	describe('Host/Origin policy is identical on every route', () => {
+		type Row = [label: string, expected: number, headers: (p: number) => Record<string, string>];
+
+		const rows: Row[] = [
+			['Host: localhost:{port}', 200, (p) => ({ Host: `localhost:${p}` })],
+			['Host: LOCALHOST:{port} (case must match)', 403, (p) => ({ Host: `LOCALHOST:${p}` })],
+			['Host: localhost.:{port} (trailing dot rejected)', 403, (p) => ({ Host: `localhost.:${p}` })],
+			['Host: 127.0.0.1:{port}', 200, (p) => ({ Host: `127.0.0.1:${p}` })],
+			['Host: localhost (no port)', 403, () => ({ Host: 'localhost' })],
+			['Host: 127.0.0.1:1 (wrong port)', 403, () => ({ Host: '127.0.0.1:1' })],
+			['Host: 127.0.0.1.evil.com:{port}', 403, (p) => ({ Host: `127.0.0.1.evil.com:${p}` })],
+			['Host: evil.com@localhost:{port}', 403, (p) => ({ Host: `evil.com@localhost:${p}` })],
+			['Origin: null', 403, () => ({ Origin: 'null' })],
+			['Origin: http://evil.com', 403, () => ({ Origin: 'http://evil.com' })],
+			['no Origin header', 200, () => ({})],
+			['Origin: http://127.0.0.1:9999 (wrong port)', 403, () => ({ Origin: 'http://127.0.0.1:9999' })],
+			[
+				'Origin: https://localhost:{port} (scheme must match)',
+				403,
+				(p) => ({
+					Origin: `https://localhost:${p}`,
+				}),
+			],
+			['Origin: http://localhost:{port}', 200, (p) => ({ Origin: `http://localhost:${p}` })],
+		];
+
+		function initializeBody() {
+			return JSON.stringify({
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'initialize',
+				params: {
+					protocolVersion: '2025-03-26',
+					capabilities: {},
+					clientInfo: { name: 'test', version: '1.0' },
+				},
+			});
+		}
+
+		it.each(rows)('%s → %d on /health and on the MCP route', async (_label, expected, buildHeaders) => {
+			const rowHeaders = buildHeaders(port);
+
+			const health = await makeRequest(port, {
+				method: 'GET',
+				path: '/health',
+				headers: { ...AUTH_HEADERS, ...rowHeaders },
+			});
+
+			const mcp = await makeRequest(port, {
+				method: 'POST',
+				path: '/sites/test-site/mcp',
+				headers: {
+					...AUTH_HEADERS,
+					Accept: 'application/json, text/event-stream',
+					...rowHeaders,
+				},
+				body: initializeBody(),
+			});
+
+			expect(health.statusCode).toBe(expected);
+			expect(mcp.statusCode).toBe(health.statusCode);
+
+			if (expected === 200) {
+				// A 200 on the MCP route only counts if the handshake actually
+				// completed — the transport's own check has to have passed too.
+				expect(mcp.headers['mcp-session-id']).toBeDefined();
+			} else {
+				expect(JSON.parse(health.body)).toEqual({ error: 'Forbidden host' });
+				expect(health.headers['cache-control']).toBe('no-store');
+			}
+		});
+
+		// `http.request` always emits a Host header for HTTP/1.1 and Node's
+		// server-side parser rejects an HTTP/1.1 request without one before our
+		// handler runs, so the missing-Host row needs a raw HTTP/1.0 request.
+		// The gate rejects before any body is read, so no body is needed.
+		it('missing Host header → 403 on /health and on the MCP route', async () => {
+			const health = await makeRawRequest(port, {
+				method: 'GET',
+				path: '/health',
+				headers: AUTH_HEADERS,
+			});
+			const mcp = await makeRawRequest(port, {
+				method: 'POST',
+				path: '/sites/test-site/mcp',
+				headers: AUTH_HEADERS,
+			});
+
+			expect(health.statusCode).toBe(403);
+			expect(mcp.statusCode).toBe(403);
+		});
+	});
 });

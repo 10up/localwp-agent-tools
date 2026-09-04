@@ -202,8 +202,17 @@ function parseSiteId(url: string): string | null {
 // Auth & DNS-Rebinding Protection
 // ---------------------------------------------------------------------------
 
-/** Hostnames we accept on Host/Origin headers — this server only ever binds to 127.0.0.1. */
-const ALLOWED_HOSTNAMES = new Set(['127.0.0.1', 'localhost']);
+/**
+ * The single loopback allowlist, in `hostname:port` form. Both rebinding
+ * layers compare against this one list — our own Host/Origin gate and the
+ * SDK's `allowedHosts`/`allowedOrigins` on the transport — so they can never
+ * accept and reject different sets. Scoped to the port this instance is bound
+ * to: a page served from another local port is a different origin and has no
+ * business reaching us.
+ */
+function buildAllowedHosts(port: number): string[] {
+	return [`127.0.0.1:${port}`, `localhost:${port}`];
+}
 
 /**
  * Constant-time comparison of a candidate token against the expected one, so
@@ -248,48 +257,41 @@ function isAuthorized(req: http.IncomingMessage, authToken: string): boolean {
 const HOST_HEADER_FORBIDDEN_CHARS = /[@/#?\s]/;
 
 /**
- * Extracts the hostname from a `Host` header value. Per RFC 7230 this is a
- * bare `host[:port]` — never a full URL — so we parse it strictly instead of
- * handing it to `new URL()`, which would silently tolerate userinfo, path,
- * fragment, and query components that don't belong in a Host header.
+ * Defeats DNS-rebinding attacks: rejects any request whose Host header — and
+ * Origin header, when it carries one — isn't exactly one of this instance's
+ * loopback entries. A request with no Origin at all passes; MCP clients aren't
+ * browsers and don't send one.
+ *
+ * The compare is byte-exact: no case folding, no trailing-dot handling, and
+ * the Origin's scheme counts. A real client builds its Host header from the
+ * URL we write into its config, which is lowercase `localhost:{port}`, so
+ * exact match costs nothing. It also means this gate and the SDK's own
+ * rebinding check — which compares the raw header against these same two
+ * lists — reach the same verdict on every request, without this code having
+ * to know anything about transport internals.
  */
-function extractHostnameFromHostHeader(headerValue: string | undefined): string | null {
-	if (!headerValue) return null;
-	if (HOST_HEADER_FORBIDDEN_CHARS.test(headerValue)) return null;
+function isAllowedHost(
+	req: http.IncomingMessage,
+	allowedHosts: readonly string[],
+	allowedOrigins: readonly string[],
+): boolean {
+	const host = req.headers.host;
+	if (!host) return false;
 
-	// Bracketed IPv6 literals (e.g. `[::1]:24842`) aren't in our loopback
-	// allowlist anyway, so reject outright rather than parsing further.
-	if (headerValue.startsWith('[')) return null;
+	// The exact compare below would reject these anyway. They stay, ahead of
+	// it, to name the smuggling shapes this gate exists to stop — and to keep
+	// the check sound if the allowlist ever grows.
+	if (HOST_HEADER_FORBIDDEN_CHARS.test(host)) return false;
 
-	const lastColon = headerValue.lastIndexOf(':');
-	return lastColon === -1 ? headerValue : headerValue.slice(0, lastColon);
-}
+	// Bracketed IPv6 literals (e.g. `[::1]:24842`) can never match: the server
+	// binds IPv4 loopback only (`server.listen(port, '127.0.0.1')`), so no
+	// allowlist entry is an IPv6 address. Reject rather than compare further.
+	if (host.startsWith('[')) return false;
 
-/** Extracts the hostname from a full `Origin` URL (e.g. `http://localhost:1234`). */
-function extractHostnameFromOrigin(headerValue: string | undefined): string | null {
-	if (!headerValue) return null;
-	try {
-		return new URL(headerValue).hostname;
-	} catch {
-		return null;
-	}
-}
-
-/**
- * Defeats DNS-rebinding attacks: rejects any request whose Host header (and
- * Origin header, when present) doesn't resolve to one of our loopback names.
- * This check is independent of the SDK's own DNS-rebinding protection so it
- * holds regardless of transport internals.
- */
-function isAllowedHost(req: http.IncomingMessage): boolean {
-	const hostname = extractHostnameFromHostHeader(req.headers.host);
-	if (!hostname || !ALLOWED_HOSTNAMES.has(hostname)) return false;
+	if (!allowedHosts.includes(host)) return false;
 
 	const origin = req.headers.origin;
-	if (origin) {
-		const originHostname = extractHostnameFromOrigin(origin);
-		if (!originHostname || !ALLOWED_HOSTNAMES.has(originHostname)) return false;
-	}
+	if (origin && !allowedOrigins.includes(origin)) return false;
 
 	return true;
 }
@@ -305,6 +307,11 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 	// (or missing-but-coerced-empty) Authorization value — never let a server
 	// come up in a state where it can't actually enforce auth.
 	if (!authToken) throw new Error('createMcpHttpServer requires a non-empty authToken');
+
+	// Built once, used by both rebinding layers. `allowedOrigins` is the same
+	// list as an origin: this server speaks plain HTTP on loopback only.
+	const allowedHosts = buildAllowedHosts(port);
+	const allowedOrigins = allowedHosts.map((host) => `http://${host}`);
 
 	const httpServer = http.createServer(async (req, res) => {
 		// Both gates run inside this try: they read attacker-controlled headers,
@@ -328,7 +335,7 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 			}
 
 			// DNS-rebinding protection: Host (and Origin, if present) must be loopback.
-			if (!isAllowedHost(req)) {
+			if (!isAllowedHost(req, allowedHosts, allowedOrigins)) {
 				res.writeHead(403, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
 				res.end(JSON.stringify({ error: 'Forbidden host' }));
 				return;
@@ -427,10 +434,12 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 					enableJsonResponse: true,
 					// Defense-in-depth: the top-level Host/Origin check above is the real
 					// fix and applies regardless of transport internals; this lets the SDK
-					// enforce the same loopback-only policy for this instance's exact port.
+					// enforce the same policy from the same lists. Both compares are
+					// exact on the raw header, so the two layers can never disagree
+					// about a request.
 					enableDnsRebindingProtection: true,
-					allowedHosts: [`127.0.0.1:${port}`, `localhost:${port}`],
-					allowedOrigins: [`http://127.0.0.1:${port}`, `http://localhost:${port}`],
+					allowedHosts,
+					allowedOrigins,
 					onsessioninitialized: (newSessionId: string) => {
 						sessions.set(newSessionId, {
 							transport,
