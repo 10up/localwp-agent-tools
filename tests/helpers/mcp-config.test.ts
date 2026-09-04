@@ -3,7 +3,13 @@ import * as os from 'os';
 import * as path from 'path';
 import { mkdtempSync, rmSync, statSync } from 'fs';
 import * as fs from 'fs-extra';
-import { buildMcpServerEntry, mergeMcpConfig, MCP_SERVER_KEY } from '../../src/helpers/mcp-config';
+import {
+	buildMcpServerEntry,
+	mergeMcpConfig,
+	MCP_SERVER_KEY,
+	GITIGNORE_MCP_CONFIG,
+	GITIGNORE_MCP_CONFIG_ENTRIES,
+} from '../../src/helpers/mcp-config';
 
 const TOKEN = 'abc123token';
 
@@ -125,5 +131,62 @@ describe('mergeMcpConfig: token integration in the written .mcp.json', () => {
 		const written = await fs.readJSON(configPath);
 		expect(written.mcpServers.other).toEqual({ url: 'http://example.com' });
 		expect(written.mcpServers[MCP_SERVER_KEY].headers).toEqual({ Authorization: 'Bearer secret-token' });
+	});
+
+	it('backs up invalid JSON to a 0600 .backup file', async () => {
+		tmpDir = mkdtempSync(path.join(os.tmpdir(), 'agent-tools-mcp-config-'));
+		const configPath = path.join(tmpDir, '.mcp.json');
+		await fs.writeFile(configPath, '{ not valid json', { mode: 0o644 });
+
+		const entry = buildMcpServerEntry('claude', 24842, 'my-site', 'secret-token');
+		await mergeMcpConfig(configPath, entry, 'mcpServers');
+
+		const backupPath = configPath + '.backup';
+		expect(await fs.pathExists(backupPath)).toBe(true);
+		expect(await fs.readFile(backupPath, 'utf-8')).toBe('{ not valid json');
+
+		// File mode bits aren't meaningful on Windows.
+		if (process.platform !== 'win32') {
+			const mode = statSync(backupPath).mode & 0o777;
+			expect(mode).toBe(0o600);
+		}
+
+		// The invalid file is replaced with a fresh, valid config.
+		const written = await fs.readJSON(configPath);
+		expect(written.mcpServers[MCP_SERVER_KEY].headers).toEqual({ Authorization: 'Bearer secret-token' });
+	});
+});
+
+describe('GITIGNORE_MCP_CONFIG_ENTRIES', () => {
+	it('has no backslashes anywhere — every entry must be a POSIX literal', () => {
+		for (const entries of Object.values(GITIGNORE_MCP_CONFIG_ENTRIES)) {
+			for (const entry of entries) {
+				expect(entry).not.toContain('\\');
+			}
+		}
+	});
+
+	it('contains the config path and its .backup counterpart for every agent', () => {
+		const allEntries = Object.values(GITIGNORE_MCP_CONFIG_ENTRIES).flat();
+
+		expect(allEntries).toEqual(
+			expect.arrayContaining([
+				'.mcp.json',
+				'.mcp.json.backup',
+				'.cursor/mcp.json',
+				'.cursor/mcp.json.backup',
+				'.windsurf/mcp.json',
+				'.windsurf/mcp.json.backup',
+				'.vscode/mcp.json',
+				'.vscode/mcp.json.backup',
+			]),
+		);
+	});
+
+	it('derives every entry from GITIGNORE_MCP_CONFIG, so they cannot drift apart', () => {
+		for (const agent of Object.keys(GITIGNORE_MCP_CONFIG) as Array<keyof typeof GITIGNORE_MCP_CONFIG>) {
+			const configPath = GITIGNORE_MCP_CONFIG[agent];
+			expect(GITIGNORE_MCP_CONFIG_ENTRIES[agent]).toEqual([configPath, `${configPath}.backup`]);
+		}
 	});
 });

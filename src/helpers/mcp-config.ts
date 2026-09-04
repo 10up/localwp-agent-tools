@@ -20,6 +20,40 @@ export const MCP_SERVER_KEY = 'local-wp';
 export type AgentTarget = 'claude' | 'cursor' | 'windsurf' | 'vscode';
 
 /**
+ * Each agent's MCP config file path, relative to the project directory,
+ * as a POSIX (forward-slash) literal.
+ *
+ * These must NOT be built with `path.join`. `.gitignore` always uses
+ * forward slashes and treats a backslash as an escape character — on
+ * Windows, `path.join('.cursor', 'mcp.json')` produces `.cursor\mcp.json`,
+ * which `.gitignore` reads as an escaped, non-matching literal. That would
+ * leave the token-bearing config file un-ignored on Windows. main.ts still
+ * uses `path.join` (derived from these same literals) for the filesystem
+ * path it actually reads and writes — only the value written into
+ * `.gitignore` needs to stay a forward-slash string on every OS.
+ */
+export const GITIGNORE_MCP_CONFIG: Record<AgentTarget, string> = {
+	claude: '.mcp.json',
+	cursor: '.cursor/mcp.json',
+	windsurf: '.windsurf/mcp.json',
+	vscode: '.vscode/mcp.json',
+};
+
+/**
+ * `.gitignore` entries for each agent: the MCP config path itself, plus the
+ * `.backup` file `mergeMcpConfig` writes when it finds invalid JSON at that
+ * path. The backup is a copy of the file it replaced, so if that file ever
+ * carried our bearer token, the backup does too — it must be ignored as
+ * well.
+ */
+export const GITIGNORE_MCP_CONFIG_ENTRIES: Record<AgentTarget, string[]> = Object.fromEntries(
+	(Object.keys(GITIGNORE_MCP_CONFIG) as AgentTarget[]).map((agent) => [
+		agent,
+		[GITIGNORE_MCP_CONFIG[agent], `${GITIGNORE_MCP_CONFIG[agent]}.backup`],
+	]),
+) as Record<AgentTarget, string[]>;
+
+/**
  * Builds the MCP server entry for a specific agent.
  * Each agent has different JSON shapes for HTTP MCP servers, but every shape
  * carries the token in exactly one place: an `Authorization: Bearer <token>`
@@ -67,6 +101,9 @@ export async function mergeMcpConfig(
 			// File exists but isn't valid JSON — back it up before overwriting
 			const backupPath = configPath + '.backup';
 			await fs.copy(configPath, backupPath);
+			// The file we just backed up may itself have carried a bearer token
+			// from an earlier, still-valid write, so lock the copy down too.
+			await fs.chmod(backupPath, 0o600);
 			console.warn(`[Agent Tools] Backed up invalid JSON at ${configPath} to ${backupPath}`);
 			existing = {};
 		}
