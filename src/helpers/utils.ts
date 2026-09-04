@@ -35,3 +35,13 @@ export function buildWpCliEnv(config: SiteConfig): NodeJS.ProcessEnv {
 		...(config.dbPort ? { DB_PORT: String(config.dbPort) } : {}),
 	};
 }
+
+/**
+ * True when `content` holds at least one complete block that starts with
+ * `start` and ends with `end`. Used to decide whether a file we did not
+ * create still carries an Agent Tools marker block.
+ */
+export function hasMarkerBlock(content: string, start: string, end: string): boolean {
+	const pattern = new RegExp(`${escapeRegex(start)}[\\s\\S]*?${escapeRegex(end)}`);
+	return pattern.test(content);
+}
