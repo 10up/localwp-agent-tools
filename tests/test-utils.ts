@@ -113,20 +113,29 @@ export function makeStreamingRequest(
 }
 
 /**
- * Sends a raw HTTP/1.0 request over a bare TCP socket, bypassing Node's
- * `http` client. `http.request` always injects a `Host` header for HTTP/1.1
- * requests, and Node's own HTTP/1.1 server-side parser rejects any HTTP/1.1
- * request that lacks one with a 400 before it ever reaches our handler.
- * HTTP/1.0 has no such requirement, so this is the only way to exercise the
- * "missing Host header" branch of the server's own DNS-rebinding check.
+ * Sends a raw request over a bare TCP socket, bypassing Node's `http` client,
+ * so a test can write a request line and header block `http.request` would
+ * never produce. Two things need this:
+ *
+ *  - A missing `Host` header. `http.request` always injects one for HTTP/1.1,
+ *    and Node's HTTP/1.1 server-side parser rejects an HTTP/1.1 request that
+ *    lacks one with a 400 before our handler runs. HTTP/1.0 (the default
+ *    `version` here) has no such requirement, so this is the only way to
+ *    reach the missing-Host branch of the server's own rebinding check.
+ *  - An absolute-form request target (`GET http://host/path`). `http.request`
+ *    only ever emits origin-form paths.
+ *
+ * Pass `version: '1.1'` for the absolute-form case, together with
+ * `Connection: close` so the socket ends once the response is written.
  */
 export function makeRawRequest(
 	port: number,
-	options: { method: string; path: string; headers?: Record<string, string> },
+	options: { method: string; path: string; headers?: Record<string, string>; version?: '1.0' | '1.1' },
 ): Promise<TestResponse> {
 	return new Promise((resolve, reject) => {
+		const version = options.version ?? '1.0';
 		const headerLines = Object.entries(options.headers || {}).map(([key, value]) => `${key}: ${value}`);
-		const request = [`${options.method} ${options.path} HTTP/1.0`, ...headerLines, '', ''].join('\r\n');
+		const request = [`${options.method} ${options.path} HTTP/${version}`, ...headerLines, '', ''].join('\r\n');
 
 		const socket = net.connect(port, '127.0.0.1', () => {
 			socket.write(request);

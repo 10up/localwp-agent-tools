@@ -8,6 +8,14 @@ import { getFreePort, makeRequest, makeRawRequest, makeStreamingRequest } from '
 
 const TEST_TOKEN = 'auth-test-token-0123456789abcdef';
 
+const AUTH_HEADERS = { Authorization: `Bearer ${TEST_TOKEN}` };
+
+/** The exact 401 body the server returns — the hint tells the user how to recover. */
+const UNAUTHORIZED_BODY = {
+	error: 'Unauthorized',
+	hint: 'Regenerate config from the Agent Tools panel in Local',
+};
+
 /**
  * Covers the two CRITICAL fixes in mcp-server.ts:
  *  - per-session bearer-token auth (every request needs `Authorization: Bearer <token>`)
@@ -61,7 +69,52 @@ describe('MCP HTTP Server: bearer auth + DNS-rebinding protection', () => {
 	it('rejects a request with no Authorization header', async () => {
 		const res = await makeRequest(port, { method: 'GET', path: '/health' });
 		expect(res.statusCode).toBe(401);
-		expect(JSON.parse(res.body)).toEqual({ error: 'Unauthorized' });
+		expect(JSON.parse(res.body)).toEqual(UNAUTHORIZED_BODY);
+	});
+
+	it('carries WWW-Authenticate, Cache-Control: no-store, and a recovery hint on a 401', async () => {
+		const res = await makeRequest(port, { method: 'GET', path: '/health' });
+		expect(res.statusCode).toBe(401);
+		expect(res.headers['www-authenticate']).toBe('Bearer realm="Agent Tools"');
+		expect(res.headers['cache-control']).toBe('no-store');
+		expect(JSON.parse(res.body)).toEqual(UNAUTHORIZED_BODY);
+	});
+
+	// `GET http://evil.com:999999/health HTTP/1.1` is a legal absolute-form
+	// request target (RFC 7230 §5.3.2) that `new URL()` cannot parse — the port
+	// is out of range, so the parse throws ERR_INVALID_URL. The auth gate must
+	// never touch `req.url`, so this has to come back as a clean 401 rather
+	// than a thrown pre-auth error that leaves the socket hanging.
+	it('returns 401 for an absolute-form request target instead of crashing pre-auth', async () => {
+		const res = await makeRawRequest(port, {
+			method: 'GET',
+			path: 'http://evil.com:999999/health',
+			version: '1.1',
+			headers: { Host: `127.0.0.1:${port}`, Connection: 'close' },
+		});
+		expect(res.statusCode).toBe(401);
+		expect(res.headers['www-authenticate']).toBe('Bearer realm="Agent Tools"');
+		// The HTTP/1.1 response is chunked, so the raw body still carries chunk
+		// framing — match on the hint text rather than parsing it as JSON.
+		expect(res.body).toContain(UNAUTHORIZED_BODY.hint);
+	});
+
+	// The auth gate is the first statement in the handler, so it must fire
+	// before routing, before the 404 branch, and before the 405 branch — no
+	// method/path pair may reach a route without the token.
+	describe('no method on any path is reachable without the token', () => {
+		const methods = ['GET', 'POST', 'DELETE', 'PUT', 'OPTIONS', 'HEAD'];
+		const paths = ['/health', '/sites/test-site/mcp', '/sites/unknown/mcp', '/nope'];
+
+		for (const method of methods) {
+			for (const path of paths) {
+				it(`${method} ${path} returns 401 with no Authorization header`, async () => {
+					const res = await makeRequest(port, { method, path });
+					expect(res.statusCode).toBe(401);
+					expect(res.headers['www-authenticate']).toBe('Bearer realm="Agent Tools"');
+				});
+			}
+		}
 	});
 
 	it('rejects a request with the wrong token', async () => {
@@ -71,7 +124,7 @@ describe('MCP HTTP Server: bearer auth + DNS-rebinding protection', () => {
 			headers: { Authorization: 'Bearer wrong-token' },
 		});
 		expect(res.statusCode).toBe(401);
-		expect(JSON.parse(res.body)).toEqual({ error: 'Unauthorized' });
+		expect(JSON.parse(res.body)).toEqual(UNAUTHORIZED_BODY);
 	});
 
 	it('rejects a same-length but different token (exercises the timingSafeEqual false branch)', async () => {
@@ -93,7 +146,7 @@ describe('MCP HTTP Server: bearer auth + DNS-rebinding protection', () => {
 			headers: { Authorization: `Bearer ${wrongToken}` },
 		});
 		expect(res.statusCode).toBe(401);
-		expect(JSON.parse(res.body)).toEqual({ error: 'Unauthorized' });
+		expect(JSON.parse(res.body)).toEqual(UNAUTHORIZED_BODY);
 	});
 
 	it('rejects an Authorization header missing the "Bearer " prefix', async () => {
@@ -109,9 +162,10 @@ describe('MCP HTTP Server: bearer auth + DNS-rebinding protection', () => {
 		const res = await makeRequest(port, {
 			method: 'GET',
 			path: '/health',
-			headers: { Authorization: `Bearer ${TEST_TOKEN}`, Host: 'evil.com' },
+			headers: { ...AUTH_HEADERS, Host: 'evil.com' },
 		});
 		expect(res.statusCode).toBe(403);
+		expect(res.headers['cache-control']).toBe('no-store');
 		expect(JSON.parse(res.body)).toEqual({ error: 'Forbidden host' });
 	});
 
@@ -180,56 +234,6 @@ describe('MCP HTTP Server: bearer auth + DNS-rebinding protection', () => {
 			headers: { Authorization: `Bearer ${TEST_TOKEN}`, Origin: `http://127.0.0.1:${port}` },
 		});
 		expect(res.statusCode).toBe(200);
-	});
-
-	// Some MCP clients (Cursor, Windsurf, VS Code Copilot) don't reliably
-	// forward a configured Authorization header on every request. The
-	// query-parameter token is a fallback channel carrying the same secret,
-	// so those clients still authenticate.
-	describe('query-parameter token fallback (no Authorization header)', () => {
-		it('authorizes a request with no Authorization header but a correct ?token= query parameter', async () => {
-			const res = await makeRequest(port, {
-				method: 'GET',
-				path: `/health?token=${TEST_TOKEN}`,
-			});
-			expect(res.statusCode).toBe(200);
-			const body = JSON.parse(res.body);
-			expect(body.status).toBe('ok');
-		});
-
-		it('rejects a same-length but wrong ?token= query parameter (exercises the query path’s timingSafeEqual false branch)', async () => {
-			// Same construction as the header-based equivalent above: a
-			// length-mismatched wrong token would short-circuit on the length
-			// guard before timingSafeEqual runs, so this matches TEST_TOKEN's
-			// length exactly with different bytes.
-			let wrongToken = randomBytes(Math.ceil(TEST_TOKEN.length / 2))
-				.toString('hex')
-				.slice(0, TEST_TOKEN.length);
-			if (wrongToken === TEST_TOKEN)
-				wrongToken = wrongToken.slice(0, -1) + (wrongToken.at(-1) === '0' ? '1' : '0');
-
-			expect(wrongToken.length).toBe(TEST_TOKEN.length);
-			expect(wrongToken).not.toBe(TEST_TOKEN);
-
-			const res = await makeRequest(port, {
-				method: 'GET',
-				path: `/health?token=${wrongToken}`,
-			});
-			expect(res.statusCode).toBe(401);
-			expect(JSON.parse(res.body)).toEqual({ error: 'Unauthorized' });
-		});
-
-		it('still rejects a forged Host header even with a correct ?token= query parameter', async () => {
-			// The Host/Origin check must run regardless of which channel
-			// carried a valid token — the query token must never bypass it.
-			const res = await makeRequest(port, {
-				method: 'GET',
-				path: `/health?token=${TEST_TOKEN}`,
-				headers: { Host: 'evil.com' },
-			});
-			expect(res.statusCode).toBe(403);
-			expect(JSON.parse(res.body)).toEqual({ error: 'Forbidden host' });
-		});
 	});
 
 	it('completes a real MCP initialize handshake with the port-scoped allowlist wired in', async () => {
@@ -303,15 +307,19 @@ describe('MCP HTTP Server: bearer auth + DNS-rebinding protection', () => {
 			expect(res.statusCode).toBe(401);
 		});
 
-		// The scenario this whole fix targets: some MCP clients open the SSE
-		// GET stream without re-sending the Authorization header. With no
-		// header at all, the ?token= query parameter must still authorize the
-		// stream and let it reach the SDK's session routing (200, not 401).
-		it('authorizes the SSE GET stream via ?token= query parameter with no Authorization header', async () => {
+		// The header is the only auth channel, so it has to work on the SSE
+		// GET stream too — that stream is what the removed ?token= fallback
+		// existed to serve. With the header present it reaches the SDK's
+		// session routing (200, not 401).
+		it('authorizes the SSE GET stream with the Authorization header', async () => {
 			const res = await makeStreamingRequest(port, {
 				method: 'GET',
-				path: `/sites/test-site/mcp?token=${TEST_TOKEN}`,
-				headers: { 'mcp-session-id': sessionId, Accept: 'application/json, text/event-stream' },
+				path: '/sites/test-site/mcp',
+				headers: {
+					...AUTH_HEADERS,
+					'mcp-session-id': sessionId,
+					Accept: 'application/json, text/event-stream',
+				},
 			});
 			expect(res.statusCode).toBe(200);
 			expect(res.headers['content-type']).toContain('text/event-stream');

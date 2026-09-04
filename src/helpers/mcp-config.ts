@@ -21,13 +21,11 @@ export type AgentTarget = 'claude' | 'cursor' | 'windsurf' | 'vscode';
 
 /**
  * Builds the MCP server entry for a specific agent.
- * Each agent has different JSON shapes for HTTP MCP servers, but every
- * shape carries an `Authorization: Bearer <token>` header alongside its
- * URL so the client can satisfy the server's per-session auth check. The
- * token is also embedded in the URL as `?token=` — some MCP clients don't
- * forward custom headers on every request (notably the SSE GET stream), so
- * the query parameter carries auth even then. Both channels carry the same
- * token; the header remains the primary path.
+ * Each agent has different JSON shapes for HTTP MCP servers, but every shape
+ * carries the token in exactly one place: an `Authorization: Bearer <token>`
+ * header. The URL never carries the token — a `?token=` query parameter would
+ * leak the secret into client logs and process listings, and the server no
+ * longer accepts one.
  */
 export function buildMcpServerEntry(
 	agent: AgentTarget,
@@ -35,7 +33,7 @@ export function buildMcpServerEntry(
 	siteId: string,
 	token: string,
 ): Record<string, any> {
-	const url = `http://localhost:${port}/sites/${siteId}/mcp?token=${encodeURIComponent(token)}`;
+	const url = `http://localhost:${port}/sites/${siteId}/mcp`;
 	const headers = { Authorization: `Bearer ${token}` };
 
 	switch (agent) {

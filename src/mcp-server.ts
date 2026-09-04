@@ -222,29 +222,24 @@ function tokenMatches(candidate: string | null, expected: string): boolean {
 }
 
 /**
- * Verifies the request carries our per-install token, via either channel:
- *  - `Authorization: Bearer <authToken>` header (primary — checked first)
- *  - `?token=<authToken>` query parameter (fallback — for MCP clients that
- *    don't forward custom headers on every request, notably the SSE GET
- *    stream some clients open without re-sending Authorization)
- * Either channel matching is sufficient; both are compared in constant time.
+ * Verifies the request carries our per-install token in an
+ * `Authorization: Bearer <authToken>` header. The header is the only accepted
+ * channel: a `?token=` query parameter would land the secret in client logs,
+ * browser history, and referrers (RFC 6750 §2.3 deprecates it), and reading it
+ * would mean parsing an attacker-controlled request target before auth. All
+ * four supported clients (Claude Code, Cursor, Windsurf, VS Code) accept a
+ * `headers` field for HTTP MCP servers, so nothing needs the query channel.
  */
 function isAuthorized(req: http.IncomingMessage, authToken: string): boolean {
 	const header = req.headers['authorization'];
-	if (typeof header === 'string') {
-		// RFC 7235: the auth-scheme token ("Bearer") is case-insensitive, so match
-		// it case-insensitively — but slice the token itself off the *original*
-		// header so we never alter the token bytes we're about to compare.
-		if (header.slice(0, 7).toLowerCase() === 'bearer ' && tokenMatches(header.slice(7), authToken)) {
-			return true;
-		}
-	}
+	if (typeof header !== 'string') return false;
 
-	// Fallback: same token, carried as a URL query parameter. Parsed from
-	// req.url only to read `token` — routing still strips the query string
-	// separately (see `parseSiteId` callsite) and never consults this value.
-	const queryToken = new URL(req.url ?? '', 'http://127.0.0.1').searchParams.get('token');
-	return tokenMatches(queryToken, authToken);
+	// RFC 7235: the auth-scheme token ("Bearer") is case-insensitive, so match
+	// it case-insensitively — but slice the token itself off the *original*
+	// header so we never alter the token bytes we're about to compare.
+	if (header.slice(0, 7).toLowerCase() !== 'bearer ') return false;
+
+	return tokenMatches(header.slice(7), authToken);
 }
 
 /** Characters with no meaning in a bare `Host` header — their presence only
@@ -312,57 +307,69 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 	if (!authToken) throw new Error('createMcpHttpServer requires a non-empty authToken');
 
 	const httpServer = http.createServer(async (req, res) => {
-		// Auth: every request must present our per-install bearer token.
-		if (!isAuthorized(req, authToken)) {
-			res.writeHead(401, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({ error: 'Unauthorized' }));
-			return;
-		}
-
-		// DNS-rebinding protection: Host (and Origin, if present) must be loopback.
-		if (!isAllowedHost(req)) {
-			res.writeHead(403, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({ error: 'Forbidden host' }));
-			return;
-		}
-
-		const url = (req.url || '').split('?')[0]; // strip query string
-		const method = req.method || 'GET';
-
-		// Health check — no siteId enumeration; auth is already enforced above.
-		if (url === '/health' && method === 'GET') {
-			res.writeHead(200, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({ status: 'ok', activeSessions: sessions.size }));
-			return;
-		}
-
-		// MCP endpoint: /sites/:siteId/mcp
-		const siteId = parseSiteId(url);
-		if (!siteId) {
-			res.writeHead(404, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({ error: 'Not found. Use /sites/{siteId}/mcp' }));
-			return;
-		}
-
-		const config = registry.get(siteId);
-		if (!config) {
-			res.writeHead(404, { 'Content-Type': 'application/json' });
-			res.end(
-				JSON.stringify({
-					error: `Site not registered: ${siteId}. The site may not be running or Agent Tools may not be enabled.`,
-				}),
-			);
-			return;
-		}
-
-		const sessionId = req.headers['mcp-session-id'] as string | undefined;
-
+		// Both gates run inside this try: they read attacker-controlled headers,
+		// so any unexpected throw must still produce a response rather than
+		// leaving the socket open with nothing written to it.
 		try {
+			// Auth: every request must present our per-install bearer token.
+			if (!isAuthorized(req, authToken)) {
+				res.writeHead(401, {
+					'Content-Type': 'application/json',
+					'WWW-Authenticate': 'Bearer realm="Agent Tools"',
+					'Cache-Control': 'no-store',
+				});
+				res.end(
+					JSON.stringify({
+						error: 'Unauthorized',
+						hint: 'Regenerate config from the Agent Tools panel in Local',
+					}),
+				);
+				return;
+			}
+
+			// DNS-rebinding protection: Host (and Origin, if present) must be loopback.
+			if (!isAllowedHost(req)) {
+				res.writeHead(403, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+				res.end(JSON.stringify({ error: 'Forbidden host' }));
+				return;
+			}
+
+			const url = (req.url || '').split('?')[0]; // strip query string
+			const method = req.method || 'GET';
+
+			// Health check — no siteId enumeration; auth is already enforced above.
+			if (url === '/health' && method === 'GET') {
+				res.writeHead(200, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ status: 'ok', activeSessions: sessions.size }));
+				return;
+			}
+
+			// MCP endpoint: /sites/:siteId/mcp
+			const siteId = parseSiteId(url);
+			if (!siteId) {
+				res.writeHead(404, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Not found. Use /sites/{siteId}/mcp' }));
+				return;
+			}
+
+			const config = registry.get(siteId);
+			if (!config) {
+				res.writeHead(404, { 'Content-Type': 'application/json' });
+				res.end(
+					JSON.stringify({
+						error: `Site not registered: ${siteId}. The site may not be running or Agent Tools may not be enabled.`,
+					}),
+				);
+				return;
+			}
+
+			const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
 			if (method === 'POST') {
 				let bodyStr: string;
 				try {
 					bodyStr = await readBody(req);
-				} catch (err) {
+				} catch {
 					if (!res.headersSent) {
 						res.writeHead(413, { 'Content-Type': 'application/json' });
 						res.end(

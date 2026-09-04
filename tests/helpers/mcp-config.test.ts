@@ -7,12 +7,14 @@ import { buildMcpServerEntry, mergeMcpConfig, MCP_SERVER_KEY } from '../../src/h
 
 const TOKEN = 'abc123token';
 
+const URL_NO_TOKEN = 'http://localhost:24842/sites/my-site/mcp';
+
 describe('buildMcpServerEntry', () => {
 	it('embeds the Authorization: Bearer <token> header for claude (.mcp.json)', () => {
 		const entry = buildMcpServerEntry('claude', 24842, 'my-site', TOKEN);
 		expect(entry).toEqual({
 			type: 'http',
-			url: `http://localhost:24842/sites/my-site/mcp?token=${TOKEN}`,
+			url: URL_NO_TOKEN,
 			headers: { Authorization: `Bearer ${TOKEN}` },
 		});
 	});
@@ -20,7 +22,7 @@ describe('buildMcpServerEntry', () => {
 	it('embeds the Authorization header for cursor', () => {
 		const entry = buildMcpServerEntry('cursor', 24842, 'my-site', TOKEN);
 		expect(entry).toEqual({
-			url: `http://localhost:24842/sites/my-site/mcp?token=${TOKEN}`,
+			url: URL_NO_TOKEN,
 			headers: { Authorization: `Bearer ${TOKEN}` },
 		});
 	});
@@ -28,7 +30,7 @@ describe('buildMcpServerEntry', () => {
 	it('embeds the Authorization header for windsurf under serverUrl', () => {
 		const entry = buildMcpServerEntry('windsurf', 24842, 'my-site', TOKEN);
 		expect(entry).toEqual({
-			serverUrl: `http://localhost:24842/sites/my-site/mcp?token=${TOKEN}`,
+			serverUrl: URL_NO_TOKEN,
 			headers: { Authorization: `Bearer ${TOKEN}` },
 		});
 	});
@@ -37,16 +39,29 @@ describe('buildMcpServerEntry', () => {
 		const entry = buildMcpServerEntry('vscode', 24842, 'my-site', TOKEN);
 		expect(entry).toEqual({
 			type: 'http',
-			url: `http://localhost:24842/sites/my-site/mcp?token=${TOKEN}`,
+			url: URL_NO_TOKEN,
 			headers: { Authorization: `Bearer ${TOKEN}` },
 		});
 	});
 
-	it('percent-encodes special characters in the token when embedding it in the URL', () => {
+	// The header is the only channel that carries the token. A URL-borne copy
+	// would leak the secret into client logs, shell history, and referrers, and
+	// the server no longer reads one — so no agent's URL may mention it, under
+	// any spelling or encoding.
+	it.each(['claude', 'cursor', 'windsurf', 'vscode'] as const)('never puts the token in the %s URL', (agent) => {
+		const entry = buildMcpServerEntry(agent, 24842, 'my-site', TOKEN);
+		const url: string = entry.url ?? entry.serverUrl;
+		expect(url).toBe(URL_NO_TOKEN);
+		expect(url).not.toContain('token');
+		expect(url).not.toContain('?');
+		expect(entry.headers).toEqual({ Authorization: `Bearer ${TOKEN}` });
+	});
+
+	it('keeps a token with URL-special characters out of the URL entirely', () => {
 		const weirdToken = 'a b&c=d/e';
 		const entry = buildMcpServerEntry('claude', 24842, 'my-site', weirdToken);
-		expect(entry.url).toBe(`http://localhost:24842/sites/my-site/mcp?token=${encodeURIComponent(weirdToken)}`);
-		// The header keeps the raw token — only the URL needs encoding.
+		expect(entry.url).toBe(URL_NO_TOKEN);
+		// The header carries the raw token — nothing needs URL encoding now.
 		expect(entry.headers).toEqual({ Authorization: `Bearer ${weirdToken}` });
 	});
 });
@@ -68,7 +83,7 @@ describe('mergeMcpConfig: token integration in the written .mcp.json', () => {
 		const written = await fs.readJSON(configPath);
 		expect(written.mcpServers[MCP_SERVER_KEY]).toEqual({
 			type: 'http',
-			url: 'http://localhost:24842/sites/my-site/mcp?token=secret-token',
+			url: URL_NO_TOKEN,
 			headers: { Authorization: 'Bearer secret-token' },
 		});
 	});
