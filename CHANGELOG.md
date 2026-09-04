@@ -13,8 +13,8 @@ All notable changes to this project will be documented in this file, per [the Ke
 
 ### Changed
 
-- Write Claude Code project context to `CLAUDE.local.md` instead of `CLAUDE.md`, so teams with a committed `CLAUDE.md` are no longer affected. `CLAUDE.local.md` is Claude Code's native local-override file for machine-specific, uncommitted instructions (props [@rickalee](https://github.com/rickalee) via [#77](https://github.com/10up/localwp-agent-tools/issues/77)).
-- On first enable or regenerate, any Agent Tools marker block previously written to `CLAUDE.md` is automatically migrated out (the block is removed, leaving the rest of `CLAUDE.md` intact).
+- Write Claude Code project context to `CLAUDE.local.md` instead of `CLAUDE.md`, so teams with a committed `CLAUDE.md` are no longer affected. `CLAUDE.local.md` is Claude Code's native local-override file for machine-specific, uncommitted instructions (props [@rickalee](https://github.com/rickalee) via [#78](https://github.com/10up/localwp-agent-tools/pull/78)).
+- Any Agent Tools marker block that an older version wrote to `CLAUDE.md` is removed on the next enable, regenerate, disable, project directory change, or agent change. The rest of `CLAUDE.md` is left intact. Teams that committed the generated block will see it removed from `CLAUDE.md` (props [@rickalee](https://github.com/rickalee) via [#78](https://github.com/10up/localwp-agent-tools/pull/78)).
 
 ## [0.2.1] - 2026-03-19
 
