@@ -8,7 +8,7 @@ export const toolDefinitions = [
 	{
 		name: 'read_wp_config',
 		description:
-			'Read and parse wp-config.php, extracting all define() constants and their values. Also shows the database table prefix. Secrets — database credentials and any constant ending in _KEY or _SALT, or starting with NONCE_ — are redacted by default; pass includeSecrets: true to see real values.',
+			'Read and parse wp-config.php, extracting all define() constants and their values. Also shows the database table prefix. Secrets (the database access secret and any constant ending in _KEY, _SALT, _SECRET, _TOKEN, or _PASS) are shown as [redacted] unless includeSecrets is true. raw output requires includeSecrets.',
 		inputSchema: {
 			type: 'object' as const,
 			properties: {
@@ -19,7 +19,7 @@ export const toolDefinitions = [
 				},
 				includeSecrets: {
 					type: 'boolean',
-					description: 'Return real values for secrets. Default false redacts them.',
+					description: 'Return real values for secrets, and allow raw output. Default false.',
 					default: false,
 				},
 			},
@@ -73,6 +73,19 @@ async function handleReadWpConfig(
 	args: Record<string, unknown>,
 	config: SiteConfig,
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
+	const includeSecrets = args.includeSecrets === true;
+
+	if (args.raw === true && includeSecrets !== true) {
+		return {
+			content: [
+				{
+					type: 'text',
+					text: 'raw output cannot be redacted reliably. Pass includeSecrets: true to get the full file, or omit raw to get parsed constants with secrets redacted.',
+				},
+			],
+		};
+	}
+
 	const configPath = path.join(config.wpPath, 'wp-config.php');
 
 	if (!existsSync(configPath)) {
@@ -82,11 +95,9 @@ async function handleReadWpConfig(
 	}
 
 	const content = await readFile(configPath, 'utf-8');
-	const includeSecrets = args.includeSecrets === true;
 
 	if (args.raw) {
-		const text = includeSecrets ? content : redactRawConfig(content);
-		return { content: [{ type: 'text', text }] };
+		return { content: [{ type: 'text', text: content }] };
 	}
 
 	const constants = redactConstants(parseDefineConstants(content), includeSecrets);
@@ -195,12 +206,25 @@ async function handleEditWpConfig(
 const REDACTED = '[redacted]';
 
 /**
- * A constant is treated as a secret when its name is DB_PASSWORD, or it ends
- * with _KEY or _SALT (covers AUTH_KEY, SECURE_AUTH_KEY, LOGGED_IN_KEY,
- * NONCE_KEY, and their *_SALT counterparts), or it starts with NONCE_.
+ * A constant is treated as a secret when its name — compared
+ * case-insensitively — is DB_PASSWORD, or it ends with _KEY, _SALT,
+ * _PASSWORD, _SECRET, _TOKEN, or _PASS (covers AUTH_KEY, SECURE_AUTH_KEY,
+ * LOGGED_IN_KEY, NONCE_KEY and their *_SALT counterparts, plus third-party
+ * credentials like STRIPE_SECRET, SMTP_PASS, API_TOKEN, and
+ * WP_REDIS_PASSWORD), or it starts with NONCE_.
  */
 export function isSecretConstant(name: string): boolean {
-	return name === 'DB_PASSWORD' || name.endsWith('_KEY') || name.endsWith('_SALT') || name.startsWith('NONCE_');
+	const upper = name.toUpperCase();
+	return (
+		upper === 'DB_PASSWORD' ||
+		upper.endsWith('_KEY') ||
+		upper.endsWith('_SALT') ||
+		upper.endsWith('_PASSWORD') ||
+		upper.endsWith('_SECRET') ||
+		upper.endsWith('_TOKEN') ||
+		upper.endsWith('_PASS') ||
+		upper.startsWith('NONCE_')
+	);
 }
 
 function redactConstants(constants: Record<string, string>, includeSecrets: boolean): Record<string, string> {
@@ -211,14 +235,6 @@ function redactConstants(constants: Record<string, string>, includeSecrets: bool
 		redacted[name] = isSecretConstant(name) ? REDACTED : value;
 	}
 	return redacted;
-}
-
-function redactRawConfig(content: string): string {
-	const regex = /(define\s*\(\s*['"]([^'"]+)['"]\s*,\s*)([^)]+?)(\s*\)\s*;)/g;
-	return content.replace(regex, (match, prefix: string, name: string, _value: string, suffix: string) => {
-		if (!isSecretConstant(name)) return match;
-		return `${prefix}'${REDACTED}'${suffix}`;
-	});
 }
 
 export function parseDefineConstants(content: string): Record<string, string> {

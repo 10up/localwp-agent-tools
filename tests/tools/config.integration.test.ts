@@ -66,8 +66,14 @@ describe('config integration tests (real file I/O)', () => {
 		expect(parsed.tablePrefix).toBe('wp_');
 	});
 
-	it('reads raw wp-config.php content', async () => {
+	it('rejects raw wp-config.php content without includeSecrets', async () => {
 		const result = await handleTool('read_wp_config', { raw: true }, config);
+		expect(result.content[0].text).toContain('includeSecrets: true');
+		expect(result.content[0].text).not.toContain("define( 'DB_NAME', 'local' );");
+	});
+
+	it('reads raw wp-config.php content when includeSecrets is true', async () => {
+		const result = await handleTool('read_wp_config', { raw: true, includeSecrets: true }, config);
 		expect(result.content[0].text).toContain("define( 'DB_NAME', 'local' );");
 		expect(result.content[0].text).toContain('<?php');
 	});

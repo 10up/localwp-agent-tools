@@ -85,6 +85,31 @@ describe('isSecretConstant', () => {
 		expect(isSecretConstant('WP_DEBUG')).toBe(false);
 		expect(isSecretConstant('WP_MEMORY_LIMIT')).toBe(false);
 	});
+
+	it('flags names case-insensitively', () => {
+		expect(isSecretConstant('auth_key')).toBe(true);
+	});
+
+	it('flags constants ending in _SECRET', () => {
+		expect(isSecretConstant('STRIPE_SECRET')).toBe(true);
+	});
+
+	it('flags constants ending in _PASS', () => {
+		expect(isSecretConstant('SMTP_PASS')).toBe(true);
+	});
+
+	it('flags constants ending in _TOKEN', () => {
+		expect(isSecretConstant('API_TOKEN')).toBe(true);
+	});
+
+	it('flags constants ending in _PASSWORD', () => {
+		expect(isSecretConstant('WP_REDIS_PASSWORD')).toBe(true);
+	});
+
+	it('does not flag DB_NAME or WP_DEBUG', () => {
+		expect(isSecretConstant('DB_NAME')).toBe(false);
+		expect(isSecretConstant('WP_DEBUG')).toBe(false);
+	});
 });
 
 describe('read_wp_config secret redaction', () => {
@@ -168,24 +193,29 @@ require_once ABSPATH . 'wp-settings.php';
 		expect(parsed.constants.NONCE_SALT).toBe('nonce-salt-secret');
 	});
 
-	it('has no real secret values in raw output by default, but keeps other content intact', async () => {
+	it('rejects raw output without includeSecrets and does not include any file content', async () => {
 		const result = await handleTool('read_wp_config', { raw: true }, config);
 		const text = result.content[0].text;
+
+		expect(text).toBe(
+			'raw output cannot be redacted reliably. Pass includeSecrets: true to get the full file, or omit raw to get parsed constants with secrets redacted.',
+		);
 
 		expect(text).not.toContain('super-secret-pw');
 		expect(text).not.toContain('auth-key-secret');
 		expect(text).not.toContain('secure-auth-salt-secret');
 		expect(text).not.toContain('nonce-key-secret');
 		expect(text).not.toContain('nonce-salt-secret');
-
-		expect(text).toContain("define( 'DB_NAME', 'local' );");
-		expect(text).toContain("define( 'DB_PASSWORD', '[redacted]' );");
+		expect(text).not.toContain('DB_NAME');
+		expect(text).not.toContain('define(');
 	});
 
-	it('returns real values in raw output when includeSecrets is true', async () => {
+	it('returns the full raw file when includeSecrets is true', async () => {
 		const result = await handleTool('read_wp_config', { raw: true, includeSecrets: true }, config);
 		const text = result.content[0].text;
 
+		expect(text).toBe(SECRET_CONFIG_TEMPLATE);
 		expect(text).toContain("define( 'DB_PASSWORD', 'super-secret-pw' );");
+		expect(text).toContain("define( 'AUTH_KEY', 'auth-key-secret' );");
 	});
 });
