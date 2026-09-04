@@ -1,7 +1,18 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import {
+	chmodSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from 'fs';
 import { getOrCreateToken } from '../../src/helpers/auth';
 
 const HEX_64 = /^[0-9a-f]{64}$/;
@@ -106,4 +117,67 @@ describe('getOrCreateToken', () => {
 		expect(readFileSync(path.join(tokenDir, 'token'), 'utf-8')).toBe(first);
 		expect(statSync(path.join(tokenDir, 'token')).mode & 0o777).toBe(0o600);
 	});
+
+	// A plain write and `fs.chmod` both follow a symlink, so an entry left at
+	// the token path pointing elsewhere would redirect the token write — and
+	// the 0600 — onto a file someone else chose. Unlinking first is what
+	// breaks that redirect. Symlinks and file modes aren't meaningful on
+	// Windows, so both cases are POSIX-only.
+	it.skipIf(process.platform === 'win32')(
+		'replaces a symlink at the token path and leaves its target untouched',
+		async () => {
+			tmpParent = mkdtempSync(path.join(os.tmpdir(), 'agent-tools-auth-'));
+			const tokenDir = path.join(tmpParent, '.local-agent-tools');
+			mkdirSync(tokenDir, { mode: 0o700 });
+
+			// A file in a sibling directory, standing in for whatever the link
+			// would be aimed at.
+			const victimDir = path.join(tmpParent, 'elsewhere');
+			mkdirSync(victimDir, { mode: 0o700 });
+			const victim = path.join(victimDir, 'victim');
+			writeFileSync(victim, 'not a token', { mode: 0o644 });
+			chmodSync(victim, 0o644);
+
+			const tokenFile = path.join(tokenDir, 'token');
+			symlinkSync(victim, tokenFile);
+
+			const token = await getOrCreateToken(tokenDir);
+
+			expect(token).toMatch(HEX_64);
+			expect(lstatSync(tokenFile).isSymbolicLink()).toBe(false);
+			expect(lstatSync(tokenFile).isFile()).toBe(true);
+			expect(readFileSync(tokenFile, 'utf-8')).toBe(token);
+			expect(statSync(tokenFile).mode & 0o777).toBe(0o600);
+
+			// The target kept its contents and its mode: neither the write nor
+			// the chmod followed the link.
+			expect(readFileSync(victim, 'utf-8')).toBe('not a token');
+			expect(statSync(victim).mode & 0o777).toBe(0o644);
+		},
+	);
+
+	// A dangling link is the same attack aimed at a path that doesn't exist
+	// yet, and `wx` alone can't get past it: opening through a symlink with
+	// O_CREAT|O_EXCL fails EEXIST, and no read can resolve it either.
+	it.skipIf(process.platform === 'win32')(
+		'replaces a dangling symlink at the token path and never creates its target',
+		async () => {
+			tmpParent = mkdtempSync(path.join(os.tmpdir(), 'agent-tools-auth-'));
+			const tokenDir = path.join(tmpParent, '.local-agent-tools');
+			mkdirSync(tokenDir, { mode: 0o700 });
+
+			const missing = path.join(tmpParent, 'never-created');
+			const tokenFile = path.join(tokenDir, 'token');
+			symlinkSync(missing, tokenFile);
+
+			const token = await getOrCreateToken(tokenDir);
+
+			expect(token).toMatch(HEX_64);
+			expect(lstatSync(tokenFile).isSymbolicLink()).toBe(false);
+			expect(lstatSync(tokenFile).isFile()).toBe(true);
+			expect(readFileSync(tokenFile, 'utf-8')).toBe(token);
+			expect(statSync(tokenFile).mode & 0o777).toBe(0o600);
+			expect(existsSync(missing)).toBe(false);
+		},
+	);
 });

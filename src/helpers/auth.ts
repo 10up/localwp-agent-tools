@@ -68,6 +68,23 @@ async function harden(tokenDir: string, tokenFile: string, token: string): Promi
 }
 
 /**
+ * Replaces whatever is at the token path with a file we created ourselves.
+ *
+ * The unlink is the security-relevant half. A plain write and `fs.chmod` both
+ * follow a symlink, so an entry left at this path pointing at another file
+ * would redirect our write — and our 0600 — onto that file, handing whoever
+ * placed the link both the token and a mode change on a file they chose.
+ * `fs.remove` deletes the link itself (and ignores a missing path), and `wx`
+ * then refuses to create through one: it creates or fails, never truncates
+ * and never follows. Throws EEXIST when another caller claims the path in
+ * between, which the caller handles by adopting that caller's token.
+ */
+async function writeFresh(tokenFile: string, token: string): Promise<void> {
+	await fs.remove(tokenFile);
+	await fs.writeFile(tokenFile, token, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
+}
+
+/**
  * Returns the per-install bearer token used to authenticate MCP HTTP
  * requests, generating and persisting one on first use. Mirrors the
  * persistence pattern in `port.ts` so the token survives across restarts.
@@ -85,20 +102,21 @@ export async function getOrCreateToken(tokenDir: string = DEFAULT_TOKEN_DIR): Pr
 	await fs.ensureDir(tokenDir, { mode: 0o700 });
 	const token = crypto.randomBytes(32).toString('hex');
 
-	if (saved.exists) {
-		// The file is there and holds nothing usable, so nothing can be
-		// authenticating with it. Overwrite in place: `wx` could only fail here,
-		// and removing the file first buys nothing because `harden` sets the
-		// mode explicitly either way.
-		await fs.writeFile(tokenFile, token, { encoding: 'utf-8', mode: 0o600 });
-		return harden(tokenDir, tokenFile, token);
-	}
-
 	try {
-		// `wx` creates or fails — it never truncates. Two callers starting at
-		// once therefore can't both write, which would leave one of them handing
-		// out a token the file no longer holds.
-		await fs.writeFile(tokenFile, token, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
+		if (saved.exists) {
+			// Something is at the path holding nothing usable, so nothing can be
+			// authenticating with it. Unlink it and create our own file: that is
+			// the only way to be sure the write lands here and not through a
+			// symlink someone left in place (see `writeFresh`).
+			await writeFresh(tokenFile, token);
+		} else {
+			// Nothing at the path. Create with `wx` — it never truncates and
+			// never follows a symlink — so two callers starting at once can't
+			// both write, which would leave one of them handing out a token the
+			// file no longer holds. No unlink on this branch on purpose: it
+			// would delete the winner's file and reopen exactly that race.
+			await fs.writeFile(tokenFile, token, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
+		}
 		return harden(tokenDir, tokenFile, token);
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
@@ -108,8 +126,21 @@ export async function getOrCreateToken(tokenDir: string = DEFAULT_TOKEN_DIR): Pr
 	const winner = await rereadUntilValid(tokenFile);
 	if (winner) return harden(tokenDir, tokenFile, winner);
 
-	// The other caller never produced a usable token. Take the file over rather
-	// than leaving startup with no token at all.
-	await fs.writeFile(tokenFile, token, { encoding: 'utf-8', mode: 0o600 });
-	return harden(tokenDir, tokenFile, token);
+	// The other caller never produced a usable token — or the path holds a
+	// dangling symlink, which `wx` reports as EEXIST and no read can resolve.
+	// Take the path over rather than leaving startup with no token at all,
+	// again unlink-then-create so this write can't be redirected either.
+	try {
+		await writeFresh(tokenFile, token);
+		return harden(tokenDir, tokenFile, token);
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+	}
+
+	// Yet another caller claimed the path in that window, so its token is the
+	// one in effect and one more read is enough to pick it up.
+	const late = await rereadUntilValid(tokenFile);
+	if (late) return harden(tokenDir, tokenFile, late);
+
+	throw new Error(`Could not create a usable token file at ${tokenFile}`);
 }
