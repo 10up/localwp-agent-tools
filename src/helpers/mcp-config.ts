@@ -60,6 +60,12 @@ export const GITIGNORE_MCP_CONFIG_ENTRIES: Record<AgentTarget, string[]> = Objec
  * header. The URL never carries the token — a `?token=` query parameter would
  * leak the secret into client logs and process listings, and the server no
  * longer accepts one.
+ *
+ * Throws on an empty token. `Authorization: Bearer ` with nothing after it
+ * can never authenticate, so a config carrying one is worse than no config
+ * at all: it looks wired up but every request gets a 401. Callers in main.ts
+ * guard with `requireAuthToken()` first — this is the backstop that keeps a
+ * missing token from reaching a file on disk.
  */
 export function buildMcpServerEntry(
 	agent: AgentTarget,
@@ -67,6 +73,8 @@ export function buildMcpServerEntry(
 	siteId: string,
 	token: string,
 ): Record<string, any> {
+	if (!token) throw new Error('buildMcpServerEntry requires a non-empty token');
+
 	const url = `http://localhost:${port}/sites/${siteId}/mcp`;
 	const headers = { Authorization: `Bearer ${token}` };
 

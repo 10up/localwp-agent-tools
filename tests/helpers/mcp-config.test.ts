@@ -70,6 +70,16 @@ describe('buildMcpServerEntry', () => {
 		// The header carries the raw token — nothing needs URL encoding now.
 		expect(entry.headers).toEqual({ Authorization: `Bearer ${weirdToken}` });
 	});
+
+	// An empty token yields `Authorization: Bearer ` — a header that can never
+	// authenticate. Writing that into a config file leaves the user with
+	// something that looks configured and 401s on every request, so the entry
+	// must never be built at all.
+	it.each(['claude', 'cursor', 'windsurf', 'vscode'] as const)('throws on an empty token for %s', (agent) => {
+		expect(() => buildMcpServerEntry(agent, 24842, 'my-site', '')).toThrow(
+			'buildMcpServerEntry requires a non-empty token',
+		);
+	});
 });
 
 describe('mergeMcpConfig: token integration in the written .mcp.json', () => {
