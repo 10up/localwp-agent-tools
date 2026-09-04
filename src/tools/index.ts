@@ -5,7 +5,15 @@ import { toolDefinitions as configTools, handleTool as handleConfigTool } from '
 import { toolDefinitions as siteTools, handleTool as handleSiteTool } from './site';
 import { toolDefinitions as environmentTools, handleTool as handleEnvironmentTool, LocalApi } from './environment';
 
-export type { LocalApi } from './environment';
+export type {
+	LocalApi,
+	CreateSiteOptions,
+	CreateSiteResult,
+	MultisiteMode,
+	AgentName,
+	ServiceVersion,
+	ServiceVersions,
+} from './environment';
 
 export type ToolResult = { content: Array<{ type: string; text: string }> };
 

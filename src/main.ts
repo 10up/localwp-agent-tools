@@ -13,7 +13,15 @@ import {
 import { SiteConfig, SiteConfigRegistry } from './helpers/site-config';
 import { findAvailablePort, savePort, removePortFile, removePortFileSync } from './helpers/port';
 import { createMcpHttpServer, startMcpHttpServer, stopMcpHttpServer, closeSessionsForSite } from './mcp-server';
-import { LocalApi } from './tools';
+import { LocalApi, CreateSiteOptions, CreateSiteResult, ServiceVersion, ServiceVersions } from './tools';
+import {
+	BUILT_IN_SITE_DEFAULTS,
+	NewSiteDefaults,
+	deriveDomain,
+	deriveSitePath,
+	formatSiteNicename,
+	validateNewSite,
+} from './helpers/new-site';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -683,7 +691,65 @@ async function getStatus(site: Local.Site): Promise<AgentToolsStatus> {
 // LocalApi Implementation — wraps Local's SiteProcessManager
 // ---------------------------------------------------------------------------
 
-function createLocalApi(): LocalApi {
+/**
+ * Roles we surface through list_service_versions, and which create_site option
+ * each maps to.
+ */
+const SERVICE_ROLE_FIELDS = [
+	{ role: Local.SiteServiceRole.PHP, key: 'php' as const },
+	{ role: Local.SiteServiceRole.DATABASE, key: 'database' as const },
+	{ role: Local.SiteServiceRole.HTTP, key: 'webServer' as const },
+];
+
+/** Local's `new-site-defaults` setting, merged over Local's built-in defaults. */
+function getNewSiteDefaults(): NewSiteDefaults {
+	let stored: Partial<NewSiteDefaults> = {};
+	try {
+		stored = LocalMain.UserData.get('settings-new-site-defaults', {}) || {};
+	} catch (err) {
+		console.warn('[Agent Tools] Could not read new site defaults, using built-ins:', err);
+	}
+	return { ...BUILT_IN_SITE_DEFAULTS, ...stored };
+}
+
+/** True when `dir` already holds a Local site's `app` or `conf` folder. */
+async function hasExistingLocalData(dir: string): Promise<boolean> {
+	const [hasApp, hasConf] = await Promise.all([
+		fs.pathExists(path.join(dir, 'app')),
+		fs.pathExists(path.join(dir, 'conf')),
+	]);
+	return hasApp || hasConf;
+}
+
+/**
+ * Local's AddSiteService only resolves once the site is fully provisioned and
+ * WordPress is installed, but it registers the site with SiteData synchronously
+ * before any of that. Poll briefly so create_site can return the new site's ID
+ * without waiting minutes for provisioning to finish.
+ */
+async function waitForSiteByDomain(domain: string, timeoutMs = 5_000): Promise<Local.Site | null> {
+	const deadline = Date.now() + timeoutMs;
+	do {
+		const site = LocalMain.SiteData.getSiteByProperty('domain', domain);
+		if (site) return site;
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	} while (Date.now() < deadline);
+	return null;
+}
+
+/**
+ * Provisioning failures surface as a dialog inside Local and then reject the
+ * promise create_site is no longer awaiting. Remember them so an agent polling
+ * site_status finds out why the site never came up.
+ */
+const siteCreationFailures = new Map<string, string>();
+
+interface LocalApiOptions {
+	/** Enables Agent Tools on a freshly created site. Wired to setupSite() by the add-on entry point. */
+	enableAgentTools(site: Local.Site, agents: AgentTarget[]): Promise<void>;
+}
+
+function createLocalApi(options: LocalApiOptions): LocalApi {
 	return {
 		async startSite(siteId: string) {
 			const serviceContainer = LocalMain.getServiceContainer();
@@ -741,11 +807,14 @@ function createLocalApi(): LocalApi {
 			const site = LocalMain.SiteData.getSite(siteId);
 			if (!site) throw new Error(`Site not found: ${siteId}`);
 
+			const creationError = siteCreationFailures.get(siteId);
+
 			return {
 				id: site.id,
 				name: site.name,
 				domain: site.domain,
 				status: siteProcessManager.getSiteStatus(site),
+				...(creationError ? { creationError } : {}),
 			};
 		},
 
@@ -763,6 +832,165 @@ function createLocalApi(): LocalApi {
 				status: statuses[site.id] || 'unknown',
 			}));
 		},
+
+		async listServiceVersions(): Promise<ServiceVersions> {
+			const serviceContainer = LocalMain.getServiceContainer();
+			const lightningServices = serviceContainer.cradle.lightningServices;
+
+			const collect = async (role: Local.SiteServiceRole, prefixed: boolean): Promise<ServiceVersion[]> => {
+				const services = await lightningServices.getServices(role);
+				const versions: ServiceVersion[] = [];
+
+				for (const [serviceName, byVersion] of Object.entries(services || {})) {
+					for (const [binVersion, service] of Object.entries(byVersion || {})) {
+						versions.push({
+							// PHP is passed as a bare version; databases and web servers as `<name>-<version>`.
+							value: prefixed ? `${serviceName}-${binVersion}` : binVersion,
+							installed: (service as { registered?: boolean })?.registered === true,
+						});
+					}
+				}
+
+				return versions.sort((a, b) => a.value.localeCompare(b.value, undefined, { numeric: true }));
+			};
+
+			const [php, database, webServer] = await Promise.all(
+				SERVICE_ROLE_FIELDS.map(({ role, key }) => collect(role, key !== 'php')),
+			);
+
+			return {
+				php,
+				database,
+				webServer,
+				note:
+					'Local does not expose its preferred versions to add-ons. Omit phpVersion, database or ' +
+					'webServer in create_site to let Local pick its own default for that service — the ' +
+					'create_site result reports which versions the new site actually got.',
+			};
+		},
+
+		async createSite(opts: CreateSiteOptions): Promise<CreateSiteResult> {
+			const serviceContainer = LocalMain.getServiceContainer();
+			const addSiteService = serviceContainer.cradle.addSite;
+
+			const siteDefaults = getNewSiteDefaults();
+			const nicename = formatSiteNicename(opts.name);
+
+			const domain = opts.domain ?? deriveDomain(nicename, siteDefaults.tld);
+			const sitesPath = path.resolve(resolveSitePath(siteDefaults.sitesPath));
+			const sitePath = path.resolve(resolveSitePath(opts.path ?? deriveSitePath(sitesPath, nicename)));
+
+			const existingSites = Object.values(LocalMain.SiteData.getSites()).map((site: Local.Site) => ({
+				domain: site.domain || '',
+				path: getSitePath(site),
+			}));
+
+			const validationError = validateNewSite(
+				{ name: opts.name, domain, sitePath },
+				{
+					existingSites,
+					defaultSitesPath: sitesPath,
+					pathHasLocalData: await hasExistingLocalData(sitePath),
+					platform: process.platform,
+				},
+			);
+			if (validationError) {
+				throw new Error(validationError);
+			}
+
+			const multisite = opts.multisite ?? 'none';
+			const multiSite =
+				multisite === 'subdirectory'
+					? Local.MultiSite.Subdir
+					: multisite === 'subdomain'
+						? Local.MultiSite.Subdomain
+						: Local.MultiSite.No;
+
+			const wpCredentials = {
+				adminUsername: opts.wpAdminUsername ?? 'admin',
+				adminPassword: opts.wpAdminPassword ?? 'admin',
+				adminEmail: opts.wpAdminEmail ?? siteDefaults.adminEmail,
+			};
+
+			const newSiteInfo: Local.NewSiteInfo = {
+				siteName: opts.name,
+				sitePath,
+				siteDomain: domain,
+				multiSite,
+				phpVersion: opts.phpVersion,
+				database: opts.database,
+				webServer: opts.webServer,
+				xdebugEnabled: opts.xdebugEnabled ?? false,
+			};
+
+			console.log(`[Agent Tools] Creating site "${opts.name}" at ${sitePath} (${domain})`);
+
+			const creation = addSiteService
+				.addSite({
+					newSiteInfo,
+					wpCredentials,
+					goToSite: false,
+					installWP: opts.installWordPress ?? true,
+					siteLanguage: opts.siteLanguage ?? siteDefaults.siteLanguage,
+				})
+				.then(async (site) => {
+					if (opts.enableAgentTools) {
+						const agents = (opts.agents ?? ['claude']) as AgentTarget[];
+						await options.enableAgentTools(site, agents);
+					}
+					return site;
+				});
+
+			// The caller usually isn't awaiting this, so record failures where a
+			// subsequent site_status call can find them.
+			creation.catch((err: unknown) => {
+				const message = err instanceof Error ? err.message : String(err);
+				console.error(`[Agent Tools] Site creation failed for "${opts.name}": ${message}`);
+				const failed = LocalMain.SiteData.getSiteByProperty('domain', domain);
+				if (failed) {
+					siteCreationFailures.set(failed.id, message);
+				}
+			});
+
+			const describe = (site: Local.Site, pending: boolean): CreateSiteResult => {
+				const services = site.services || {};
+				const dbService = services.mysql || services.mariadb;
+				const httpService = services.nginx || services.apache;
+
+				return {
+					id: site.id,
+					name: site.name,
+					domain: site.domain || domain,
+					path: getSitePath(site),
+					// In localhost router mode site.url embeds the HTTP port, which is
+					// still unallocated while the site is provisioning.
+					url: site.url && !site.url.includes('undefined') ? site.url : `http://${site.domain || domain}`,
+					status: serviceContainer.cradle.siteProcessManager.getSiteStatus(site),
+					phpVersion: services.php?.version || opts.phpVersion || '',
+					database: dbService ? `${dbService.name}-${dbService.version}` : opts.database || '',
+					webServer: httpService ? `${httpService.name}-${httpService.version}` : opts.webServer || '',
+					multisite,
+					wpAdminUsername: wpCredentials.adminUsername,
+					wpAdminPassword: wpCredentials.adminPassword,
+					wpAdminEmail: wpCredentials.adminEmail,
+					agentToolsEnabled: !pending && !!opts.enableAgentTools,
+					pending,
+				};
+			};
+
+			if (opts.wait) {
+				return describe(await creation, false);
+			}
+
+			const site = await waitForSiteByDomain(domain);
+			if (!site) {
+				// Creation blew up before Local even registered the site — surface that error.
+				await creation;
+				throw new Error(`Site "${opts.name}" was not registered with Local. Check Local's logs for details.`);
+			}
+
+			return describe(site, true);
+		},
 	};
 }
 
@@ -774,7 +1002,9 @@ export default function (context: LocalMain.AddonMainContext): void {
 	const { notifier, electron } = context;
 
 	let httpServer: ReturnType<typeof createMcpHttpServer> | null = null;
-	const localApi = createLocalApi();
+	const localApi = createLocalApi({
+		enableAgentTools: (site, agents) => setupSite(site, notifier, '', agents),
+	});
 
 	// Start the MCP HTTP server
 	(async () => {

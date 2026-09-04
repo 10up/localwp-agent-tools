@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file, per [the Ke
 
 ## [Unreleased]
 
+### Added
+
+- `create_site` MCP tool — create a new WordPress site in Local, with optional PHP / database / web server versions, multisite mode, WordPress admin credentials, and Xdebug. Returns as soon as the site is registered so the call does not outlive the MCP client's request timeout; poll `site_status` until the site reports `running`, or pass `wait: true` to block (props [@ivanlopez](https://github.com/ivanlopez) via [#80](https://github.com/10up/localwp-agent-tools/pull/80)).
+- `create_site` can enable Agent Tools on the site it creates via `enableAgentTools`, registering it with the MCP server and writing its MCP config and context files for the agents named in `agents` (props [@ivanlopez](https://github.com/ivanlopez) via [#80](https://github.com/10up/localwp-agent-tools/pull/80)).
+- `list_service_versions` MCP tool — list the PHP, database, and web server versions available to `create_site`, flagging which are already installed versus downloaded on demand (props [@ivanlopez](https://github.com/ivanlopez) via [#80](https://github.com/10up/localwp-agent-tools/pull/80)).
+- `site_status` now reports a `creationError` when a site created with `create_site` failed during provisioning (props [@ivanlopez](https://github.com/ivanlopez) via [#80](https://github.com/10up/localwp-agent-tools/pull/80)).
+
 ### Changed
 
 - Write Claude Code project context to `CLAUDE.local.md` instead of `CLAUDE.md`, so teams with a committed `CLAUDE.md` are no longer affected. `CLAUDE.local.md` is Claude Code's native local-override file for machine-specific, uncommitted instructions (props [@rickalee](https://github.com/rickalee) via [#77](https://github.com/10up/localwp-agent-tools/issues/77)).
