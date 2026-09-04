@@ -10,7 +10,7 @@ When you click "Enable" on a site in Local, the add-on:
 
 1. **Registers the site with the MCP server** — a single HTTP server running in Local's main process that gives AI tools access to WP-CLI, error logs, configuration, and site management
 2. **Writes MCP config** (`.mcp.json`, `.cursor/mcp.json`, etc.) — auto-configured with the correct HTTP endpoint for each agent
-3. **Generates project context** (`CLAUDE.md`, `.cursorrules`, etc.) — site context including PHP/MySQL versions, active plugins, theme, and file structure
+3. **Generates project context** (`CLAUDE.local.md`, `.cursorrules`, etc.) — site context including PHP/MySQL versions, active plugins, theme, and file structure
 4. **Updates `.gitignore`** — so generated files aren't committed
 
 Then open the site folder in your AI tool of choice and you're ready to go.
@@ -31,7 +31,7 @@ Sites remain registered even when stopped, so the MCP endpoint is always reachab
 
 | Agent           | MCP Config           | Context File                      |
 | --------------- | -------------------- | --------------------------------- |
-| Claude Code     | `.mcp.json`          | `CLAUDE.md`                       |
+| Claude Code     | `.mcp.json`          | `CLAUDE.local.md`                 |
 | Cursor          | `.cursor/mcp.json`   | `.cursorrules`                    |
 | Windsurf        | `.windsurf/mcp.json` | `.windsurfrules`                  |
 | VS Code Copilot | `.vscode/mcp.json`   | `.github/copilot-instructions.md` |

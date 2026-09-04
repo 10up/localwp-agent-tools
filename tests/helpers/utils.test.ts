@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { buildWpCliEnv } from '../../src/helpers/utils';
+import { buildWpCliEnv, hasMarkerBlock } from '../../src/helpers/utils';
 import type { SiteConfig } from '../../src/helpers/site-config';
 
 function makeSiteConfig(overrides: Partial<SiteConfig> = {}): SiteConfig {
@@ -69,5 +69,27 @@ describe('buildWpCliEnv', () => {
 		expect(env.DB_NAME).toBe('local');
 		expect(env.DB_USER).toBe('root');
 		expect(env.DB_PASSWORD).toBe('root');
+	});
+});
+
+describe('hasMarkerBlock', () => {
+	const start = '<!-- >>> Agent Tools (auto-generated, do not edit) -->';
+	const end = '<!-- <<< Agent Tools -->';
+
+	it('returns true when a complete marker block is present', () => {
+		const content = `# My notes\n\n${start}\nGenerated context\n${end}\n\nMore notes\n`;
+		expect(hasMarkerBlock(content, start, end)).toBe(true);
+	});
+
+	it('returns false for a file without our markers', () => {
+		expect(hasMarkerBlock('# My notes\n\nHand-written content\n', start, end)).toBe(false);
+	});
+
+	it('returns false when only the start marker is present', () => {
+		expect(hasMarkerBlock(`${start}\nTruncated block\n`, start, end)).toBe(false);
+	});
+
+	it('returns false for an empty file', () => {
+		expect(hasMarkerBlock('', start, end)).toBe(false);
 	});
 });

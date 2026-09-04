@@ -12,6 +12,7 @@ import {
 } from './helpers/paths';
 import { SiteConfig, SiteConfigRegistry } from './helpers/site-config';
 import { findAvailablePort, savePort, removePortFile, removePortFileSync } from './helpers/port';
+import { hasMarkerBlock } from './helpers/utils';
 import { createMcpHttpServer, startMcpHttpServer, stopMcpHttpServer, closeSessionsForSite } from './mcp-server';
 import { LocalApi, CreateSiteOptions, CreateSiteResult, ServiceVersion, ServiceVersions } from './tools';
 import {
@@ -45,6 +46,8 @@ interface AgentTargetConfig {
 	mcpConfigTopLevelKey: string;
 	/** Path to project context/instructions file, relative to project dir */
 	contextFilePath: string;
+	/** Context files older versions wrote for this agent; our marker block is removed from them */
+	legacyContextFilePaths?: string[];
 	/** Extra entries to add to .gitignore */
 	gitignoreEntries: string[];
 }
@@ -54,8 +57,9 @@ const AGENT_TARGETS: Record<AgentTarget, AgentTargetConfig> = {
 		label: 'Claude Code',
 		mcpConfigPath: '.mcp.json',
 		mcpConfigTopLevelKey: 'mcpServers',
-		contextFilePath: 'CLAUDE.md',
-		gitignoreEntries: ['.mcp.json', 'CLAUDE.md'],
+		contextFilePath: 'CLAUDE.local.md',
+		legacyContextFilePaths: ['CLAUDE.md'],
+		gitignoreEntries: ['.mcp.json', 'CLAUDE.local.md'],
 	},
 	cursor: {
 		label: 'Cursor',
@@ -406,6 +410,27 @@ async function updateGitignore(dirPath: string, agents: AgentTarget[]): Promise<
 }
 
 // ---------------------------------------------------------------------------
+// Migration Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Removes any Agent Tools marker block from context files that older versions
+ * wrote for an agent (for example CLAUDE.md, before the move to CLAUDE.local.md).
+ * Files without our marker block are left untouched.
+ */
+async function removeLegacyContextFiles(projectPath: string, agent: AgentTarget): Promise<void> {
+	for (const relativePath of AGENT_TARGETS[agent].legacyContextFilePaths ?? []) {
+		const legacyPath = path.join(projectPath, relativePath);
+		if (!(await fs.pathExists(legacyPath))) continue;
+
+		const content = await fs.readFile(legacyPath, 'utf-8');
+		if (!hasMarkerBlock(content, CONTEXT_MARKER_START, CONTEXT_MARKER_END)) continue;
+
+		await removeContextFile(legacyPath, agent);
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Core Functions
 // ---------------------------------------------------------------------------
 
@@ -435,7 +460,8 @@ async function setupSite(site: Local.Site, notifier: any, projectDir: string, ag
 		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
 		await mergeMcpConfig(mcpConfigPath, serverEntry, agentConfig.mcpConfigTopLevelKey);
 
-		// Write project context
+		// Write project context (and clean up any context file an older version wrote)
+		await removeLegacyContextFiles(projectPath, agent);
 		const contextPath = path.join(projectPath, agentConfig.contextFilePath);
 		await writeContextFile(contextPath, contextContent, agent);
 	}
@@ -480,6 +506,7 @@ async function teardownSite(site: Local.Site, notifier: any): Promise<void> {
 
 		await removeMcpConfigEntry(path.join(projectPath, agentConfig.mcpConfigPath), agentConfig.mcpConfigTopLevelKey);
 		await removeContextFile(path.join(projectPath, agentConfig.contextFilePath), agent);
+		await removeLegacyContextFiles(projectPath, agent);
 	}
 
 	// 4. Clean up .gitignore
@@ -515,6 +542,7 @@ async function changeProjectDir(site: Local.Site, newProjectDir: string, notifie
 
 		await removeMcpConfigEntry(path.join(oldPath, agentConfig.mcpConfigPath), agentConfig.mcpConfigTopLevelKey);
 		await removeContextFile(path.join(oldPath, agentConfig.contextFilePath), agent);
+		await removeLegacyContextFiles(oldPath, agent);
 	}
 	await updateGitignore(oldPath, []);
 
@@ -530,6 +558,7 @@ async function changeProjectDir(site: Local.Site, newProjectDir: string, notifie
 			serverEntry,
 			agentConfig.mcpConfigTopLevelKey,
 		);
+		await removeLegacyContextFiles(newPath, agent);
 		await writeContextFile(path.join(newPath, agentConfig.contextFilePath), contextContent, agent);
 	}
 
@@ -566,6 +595,7 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 
 		await removeMcpConfigEntry(path.join(projectPath, agentConfig.mcpConfigPath), agentConfig.mcpConfigTopLevelKey);
 		await removeContextFile(path.join(projectPath, agentConfig.contextFilePath), agent);
+		await removeLegacyContextFiles(projectPath, agent);
 	}
 
 	// Add configs for newly selected agents
@@ -581,6 +611,7 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 				serverEntry,
 				agentConfig.mcpConfigTopLevelKey,
 			);
+			await removeLegacyContextFiles(projectPath, agent);
 			await writeContextFile(path.join(projectPath, agentConfig.contextFilePath), contextContent, agent);
 		}
 	}
@@ -626,6 +657,7 @@ async function regenerateConfig(site: Local.Site): Promise<void> {
 			serverEntry,
 			agentConfig.mcpConfigTopLevelKey,
 		);
+		await removeLegacyContextFiles(projectPath, agent);
 		await writeContextFile(path.join(projectPath, agentConfig.contextFilePath), contextContent, agent);
 	}
 }

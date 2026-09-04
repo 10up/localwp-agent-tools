@@ -11,6 +11,11 @@ All notable changes to this project will be documented in this file, per [the Ke
 - `list_service_versions` MCP tool — list the PHP, database, and web server versions available to `create_site`, flagging which are already installed versus downloaded on demand (props [@ivanlopez](https://github.com/ivanlopez) via [#80](https://github.com/10up/localwp-agent-tools/pull/80)).
 - `site_status` now reports a `creationError` when a site created with `create_site` failed during provisioning (props [@ivanlopez](https://github.com/ivanlopez) via [#80](https://github.com/10up/localwp-agent-tools/pull/80)).
 
+### Changed
+
+- Write Claude Code project context to `CLAUDE.local.md` instead of `CLAUDE.md`, so teams with a committed `CLAUDE.md` are no longer affected. `CLAUDE.local.md` is Claude Code's native local-override file for machine-specific, uncommitted instructions (props [@rickalee](https://github.com/rickalee) via [#78](https://github.com/10up/localwp-agent-tools/pull/78)).
+- Any Agent Tools marker block that an older version wrote to `CLAUDE.md` is removed on the next enable, regenerate, disable, project directory change, or agent change. The rest of `CLAUDE.md` is left intact. Teams that committed the generated block will see it removed from `CLAUDE.md` (props [@rickalee](https://github.com/rickalee) via [#78](https://github.com/10up/localwp-agent-tools/pull/78)).
+
 ## [0.2.1] - 2026-03-19
 
 ### Fixed
