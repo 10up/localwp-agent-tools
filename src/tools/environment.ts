@@ -247,7 +247,7 @@ export const toolDefinitions = [
 				},
 				agents: {
 					type: 'array',
-					items: { type: 'string', enum: ['claude', 'cursor', 'windsurf', 'vscode'] },
+					items: { type: 'string', enum: [...AGENT_NAMES] },
 					description:
 						'Which agents to configure when enableAgentTools is true. Optional — defaults to ["claude"].',
 				},

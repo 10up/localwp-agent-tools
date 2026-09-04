@@ -152,6 +152,7 @@ agent-tools/
 │   ├── helpers/
 │   │   ├── site-config.ts      # SiteConfig type and SiteConfigRegistry
 │   │   ├── paths.ts            # Platform-specific binary resolution (PHP, MySQL, WP-CLI)
+│   │   ├── new-site.ts         # Pure helpers for create_site: nicename, domain, and path validation
 │   │   └── port.ts             # Stable port allocation with file persistence
 │   └── tools/                  # MCP tool implementations
 │       ├── index.ts            # Aggregates definitions, routes handleToolCall()
@@ -159,7 +160,7 @@ agent-tools/
 │       ├── logs.ts             # read_error_log, read_access_log, wp_debug_toggle
 │       ├── config.ts           # read_wp_config, edit_wp_config
 │       ├── site.ts             # get_site_info, site_health_check
-│       └── environment.ts      # site_start, site_stop, site_restart, site_status, list_sites
+│       └── environment.ts      # site_start, site_stop, site_restart, site_status, list_sites, create_site, list_service_versions
 ├── lib/                        # Compiled output
 ├── package.json
 └── tsconfig.json

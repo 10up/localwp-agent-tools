@@ -846,8 +846,8 @@ function createLocalApi(options: LocalApiOptions): LocalApi {
 			const nicename = formatSiteNicename(opts.name);
 
 			const domain = opts.domain ?? deriveDomain(nicename, siteDefaults.tld);
-			const sitesPath = resolveSitePath(siteDefaults.sitesPath);
-			const sitePath = resolveSitePath(opts.path ?? deriveSitePath(sitesPath, nicename));
+			const sitesPath = path.resolve(resolveSitePath(siteDefaults.sitesPath));
+			const sitePath = path.resolve(resolveSitePath(opts.path ?? deriveSitePath(sitesPath, nicename)));
 
 			const existingSites = Object.values(LocalMain.SiteData.getSites()).map((site: Local.Site) => ({
 				domain: site.domain || '',
