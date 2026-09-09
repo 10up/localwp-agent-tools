@@ -30,20 +30,20 @@
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
-		"@getflywheel/local": "^9",
+		"@getflywheel/local": "^10",
 		"@types/fs-extra": "^11.0.4",
 		"@types/node": "^20.0.0",
 		"@types/react": "^18.2.0",
-		"@vitest/coverage-v8": "^4.1.0",
+		"@vitest/coverage-v8": "^4.1.11",
 		"eslint": "^10.0.3",
 		"eslint-config-prettier": "^10.1.8",
 		"prettier": "^3.8.1",
 		"typescript": "^5.3.0",
 		"typescript-eslint": "^8.57.1",
-		"vitest": "^4.1.0"
+		"vitest": "^4.1.11"
 	},
 	"dependencies": {
-		"@getflywheel/local-components": "^17.6.2",
+		"@getflywheel/local-components": "^17.8.2",
 		"@modelcontextprotocol/sdk": "^1.12.0",
 		"fs-extra": "^11.2.0",
 		"lodash": "^4.18.1",
