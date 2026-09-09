@@ -17,7 +17,8 @@ export const toolDefinitions = [
 			properties: {
 				siteId: {
 					type: 'string',
-					description: 'The Local site ID of the site to clone. Optional — defaults to the current site.',
+					description:
+						'The Local site ID of the site to clone. Optional on a per-site endpoint, where it defaults to the current site. Required on the global endpoint.',
 				},
 				label: {
 					type: 'string',
@@ -59,19 +60,31 @@ export const toolDefinitions = [
 export async function handleTool(
 	name: string,
 	args: Record<string, unknown>,
-	config: SiteConfig,
+	config: SiteConfig | null,
 	localApi: LocalApi,
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
 	try {
 		let result: unknown;
 
 		switch (name) {
-			case 'preview_start':
-				result = await localApi.createPreview(
-					(args.siteId as string) || config.siteId,
-					args.label as string | undefined,
-				);
+			case 'preview_start': {
+				// On the global endpoint there is no bound site, so siteId is mandatory there.
+				const parentSiteId = (args.siteId as string) || config?.siteId;
+				if (!parentSiteId) {
+					return {
+						content: [
+							{
+								type: 'text',
+								text:
+									'Error: preview_start needs a siteId on the global endpoint, because no site is bound to it. ' +
+									'Pass the siteId of the site to clone. Use list_sites to find site IDs.',
+							},
+						],
+					};
+				}
+				result = await localApi.createPreview(parentSiteId, args.label as string | undefined);
 				break;
+			}
 			case 'preview_list':
 				result = await localApi.listPreviews();
 				break;

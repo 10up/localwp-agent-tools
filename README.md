@@ -17,10 +17,11 @@ Then open the site folder in your AI tool of choice and you're ready to go.
 
 ## Architecture
 
-The MCP server runs as a single HTTP server inside Local's Electron main process — no separate Node.js processes per site. Each site gets its own endpoint:
+The MCP server runs as a single HTTP server inside Local's Electron main process — no separate Node.js processes per site. It serves two kinds of endpoint:
 
 ```
-http://localhost:{port}/sites/{siteId}/mcp
+http://localhost:{port}/sites/mcp             # global — all of Local
+http://localhost:{port}/sites/{siteId}/mcp    # one specific site
 ```
 
 The server uses the MCP Streamable HTTP transport. The port is stable across restarts (persisted at `~/.local-agent-tools/port`, default 24842).
@@ -65,6 +66,49 @@ Local lets you choose where the add-on writes its project files: Site Root, Word
 
 The server only answers requests whose `Host` header is exactly `localhost:{port}` or `127.0.0.1:{port}`. A hand-written MCP config must use one of those two values.
 
+## The global endpoint
+
+`/sites/mcp` is not tied to any site. You configure it once and use it from any directory, so you do not need to open a site folder first.
+
+It serves the tools that do not need a bound site:
+
+- The tools that address Local itself: `list_sites`, `create_site`, and `list_service_versions`.
+- The site lifecycle tools, `site_start` and friends, which take an explicit `siteId`.
+- The preview tools. `preview_list` and `preview_destroy` address Local itself. `preview_start` needs a `siteId` here, because no site is bound to this endpoint.
+- The tools that turn Agent Tools on and off per site: `enable_agent_tools`, `disable_agent_tools`, and `agent_tools_status`.
+
+This makes the global endpoint the way to bootstrap. Connect to it, create or find a site, and enable Agent Tools on it. `enable_agent_tools` returns that site's own endpoint URL for the site-scoped work.
+
+The site-scoped tools are not served here: `wp_cli`, the log readers, the wp-config tools, `get_site_info`, and `site_health_check`. They need a bound site. Calling one on the global endpoint returns an error that points at the per-site endpoint.
+
+The global endpoint uses the same bearer token and the same Host and Origin checks as the per-site endpoints. To add it to Claude Code, using the persisted port and token:
+
+```bash
+claude mcp add --scope user --transport http local-wp-global \
+  "http://localhost:$(cat ~/.local-agent-tools/port)/sites/mcp" \
+  --header "Authorization: Bearer $(cat ~/.local-agent-tools/token)"
+```
+
+`--scope user` is the part that makes it global. Without it, `claude mcp add` uses `--scope local`, which registers the server only for the directory you ran it in. Do not use `--scope project` for this server: a project-scoped `.mcp.json` is committed to the repo, and this entry carries the token.
+
+You can also add it by hand, as a top-level `mcpServers` entry in `~/.claude.json`. Cursor, Windsurf, and VS Code use the same shapes as the per-site config the add-on writes.
+
+```json
+{
+	"mcpServers": {
+		"local-wp-global": {
+			"type": "http",
+			"url": "http://localhost:24842/sites/mcp",
+			"headers": { "Authorization": "Bearer <token from ~/.local-agent-tools/token>" }
+		}
+	}
+}
+```
+
+`claude mcp list` confirms it connected.
+
+The global endpoint puts site management and `create_site` behind one well-known URL. Before, they were reachable only from an enabled site's endpoint. The token still gates every request, so the trust model in [What the token does not protect against](#what-the-token-does-not-protect-against) applies unchanged.
+
 ## Supported Agents
 
 | Agent           | MCP Config           | Context File                      |
@@ -74,7 +118,7 @@ The server only answers requests whose `Host` header is exactly `localhost:{port
 | Windsurf        | `.windsurf/mcp.json` | `.windsurfrules`                  |
 | VS Code Copilot | `.vscode/mcp.json`   | `.github/copilot-instructions.md` |
 
-## MCP Tools (15 total)
+## MCP Tools (21 total)
 
 | Category        | Tools                   | Description                                                                                                                                                                                                                          |
 | --------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -93,6 +137,12 @@ The server only answers requests whose `Host` header is exactly `localhost:{port
 |                 | `list_sites`            | List all Local sites with status                                                                                                                                                                                                     |
 |                 | `create_site`           | Create a new WordPress site in Local, optionally enabling Agent Tools on it                                                                                                                                                          |
 |                 | `list_service_versions` | PHP, database, and web server versions available to `create_site`                                                                                                                                                                    |
+| **Preview**     | `preview_start`         | Clone a site into a disposable preview site with its own database, processes, domain, and MCP endpoint                                                                                                                               |
+|                 | `preview_list`          | List preview sites and their MCP endpoint URLs                                                                                                                                                                                       |
+|                 | `preview_destroy`       | Delete a preview site; refuses to delete regular sites                                                                                                                                                                               |
+| **Agent Tools** | `enable_agent_tools`    | Enable Agent Tools on a site: register it and write its MCP config and context files                                                                                                                                                 |
+|                 | `disable_agent_tools`   | Disable Agent Tools on a site and remove what it wrote                                                                                                                                                                               |
+|                 | `agent_tools_status`    | Report which sites have Agent Tools enabled, their agents, and their MCP endpoint URLs                                                                                                                                               |
 
 ### Creating sites
 
@@ -186,19 +236,20 @@ agent-tools/
 ├── src/                        # Add-on source (TypeScript)
 │   ├── main.ts                 # Main process — lifecycle hooks, IPC, MCP server startup
 │   ├── renderer.tsx            # Renderer process — React UI
-│   ├── mcp-server.ts           # HTTP MCP server — session management, Streamable HTTP transport
+│   ├── mcp-server.ts           # HTTP MCP server — routing, session management, Streamable HTTP transport
 │   ├── helpers/
 │   │   ├── site-config.ts      # SiteConfig type and SiteConfigRegistry
 │   │   ├── paths.ts            # Platform-specific binary resolution (PHP, MySQL, WP-CLI)
 │   │   ├── new-site.ts         # Pure helpers for create_site: nicename, domain, and path validation
 │   │   └── port.ts             # Stable port allocation with file persistence
 │   └── tools/                  # MCP tool implementations
-│       ├── index.ts            # Aggregates definitions, routes handleToolCall()
+│       ├── index.ts            # Aggregates definitions (full vs global), routes handleToolCall()
 │       ├── wpcli.ts            # wp_cli
 │       ├── logs.ts             # read_error_log, read_access_log, wp_debug_toggle
 │       ├── config.ts           # read_wp_config, edit_wp_config
 │       ├── site.ts             # get_site_info, site_health_check
-│       └── environment.ts      # site_start, site_stop, site_restart, site_status, list_sites, create_site, list_service_versions
+│       ├── environment.ts      # site_start, site_stop, site_restart, site_status, list_sites, create_site, list_service_versions
+│       └── agent-tools.ts      # enable_agent_tools, disable_agent_tools, agent_tools_status
 ├── lib/                        # Compiled output
 ├── package.json
 └── tsconfig.json

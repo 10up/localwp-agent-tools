@@ -319,7 +319,7 @@ exports[`Tool definitions snapshot > matches the expected tool API surface 1`] =
           "type": "string",
         },
         "siteId": {
-          "description": "The Local site ID of the site to clone. Optional — defaults to the current site.",
+          "description": "The Local site ID of the site to clone. Optional on a per-site endpoint, where it defaults to the current site. Required on the global endpoint.",
           "type": "string",
         },
       },
@@ -348,6 +348,65 @@ exports[`Tool definitions snapshot > matches the expected tool API surface 1`] =
       "type": "object",
     },
     "name": "preview_destroy",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "agents": {
+          "description": "Which agents to configure. Optional — defaults to ["claude"].",
+          "items": {
+            "enum": [
+              "claude",
+              "cursor",
+              "windsurf",
+              "vscode",
+            ],
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "projectDir": {
+          "description": "Subdirectory of the site folder to write the agent config into, relative to the site root (e.g. "app/public/wp-content/themes/my-theme"). Optional — defaults to the site root. Must stay inside the site folder.",
+          "type": "string",
+        },
+        "siteId": {
+          "description": "The Local site ID. Use list_sites or agent_tools_status to find it.",
+          "type": "string",
+        },
+      },
+      "required": [
+        "siteId",
+      ],
+      "type": "object",
+    },
+    "name": "enable_agent_tools",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "siteId": {
+          "description": "The Local site ID. Use list_sites or agent_tools_status to find it.",
+          "type": "string",
+        },
+      },
+      "required": [
+        "siteId",
+      ],
+      "type": "object",
+    },
+    "name": "disable_agent_tools",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "siteId": {
+          "description": "Optional — restrict the report to a single site.",
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "agent_tools_status",
   },
 ]
 `;
@@ -440,6 +499,18 @@ Always pass a "label" describing the purpose of the preview (the task, branch, o
   {
     "description": "Permanently delete a preview site, with its files moved to trash. ONLY works on sites created by preview_start and refuses to delete regular sites.",
     "name": "preview_destroy",
+  },
+  {
+    "description": "Enable Agent Tools on a Local site — registers it with this MCP server and writes its MCP config and project context files for the chosen agents. Same effect as clicking Enable in Local's UI. Returns the site's own MCP endpoint URL, which is the endpoint to use for site-scoped tools like wp_cli and the log readers.",
+    "name": "enable_agent_tools",
+  },
+  {
+    "description": "Disable Agent Tools on a Local site — unregisters it from this MCP server, closes its open MCP sessions, and removes the MCP config entry and project context it wrote. Leaves the site itself untouched. No-op if the site was not enabled.",
+    "name": "disable_agent_tools",
+  },
+  {
+    "description": "Report Agent Tools state for Local sites: whether it is enabled, which agents are configured, the project directory its config was written to, whether the site is currently registered with this MCP server, and the site's MCP endpoint URL. Omit siteId to report on every site.",
+    "name": "agent_tools_status",
   },
 ]
 `;

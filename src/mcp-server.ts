@@ -1,7 +1,7 @@
 import * as http from 'http';
 import { randomUUID, timingSafeEqual } from 'crypto';
-import { SiteConfigRegistry } from './helpers/site-config';
-import { allToolDefinitions, crossSiteToolNames, handleToolCall, LocalApi } from './tools';
+import { SiteConfig, SiteConfigRegistry } from './helpers/site-config';
+import { allToolDefinitions, crossSiteToolNames, globalToolDefinitions, handleToolCall, LocalApi } from './tools';
 
 // ---------------------------------------------------------------------------
 // MCP SDK — loaded via require() for CJS compatibility.
@@ -33,7 +33,8 @@ type McpRequest = any;
 interface SessionEntry {
 	transport: McpTransport;
 	server: McpServer;
-	siteId: string;
+	/** null for sessions on the global endpoint, which is not bound to a site. */
+	siteId: string | null;
 	lastActivity: number;
 }
 
@@ -130,36 +131,43 @@ function closeAllSessions(): void {
 // MCP Server Factory — creates a Server instance for a specific site
 // ---------------------------------------------------------------------------
 
-function createMcpServer(siteId: string, registry: SiteConfigRegistry, localApi: LocalApi): McpServer {
+function createMcpServer(siteId: string | null, registry: SiteConfigRegistry, localApi: LocalApi): McpServer {
 	const server = new Server({ name: 'local-wp', version: '1.0.0' }, { capabilities: { tools: {} } });
 
+	// The global endpoint has no bound site, so it only advertises the tools that
+	// address Local itself or take an explicit siteId.
 	server.setRequestHandler(ListToolsRequestSchema, async () => {
-		return { tools: allToolDefinitions };
+		return { tools: siteId ? allToolDefinitions : globalToolDefinitions };
 	});
 
 	server.setRequestHandler(CallToolRequestSchema, async (request: McpRequest) => {
 		const { name, arguments: args } = request.params;
+		console.log(`[Agent Tools] Tool called: ${name} (${siteId ? `site: ${siteId}` : 'global'})`);
 
 		// Site-bound tools accept an optional siteId to target another registered
 		// site (e.g. a preview) without the client reconnecting to its endpoint.
+		// A global session has no bound site, so it never resolves a SiteConfig:
+		// handleToolCall refuses site-scoped tools there.
 		const argSiteId = (args as Record<string, unknown> | undefined)?.siteId;
 		const targetSiteId =
-			crossSiteToolNames.has(name) && typeof argSiteId === 'string' && argSiteId ? argSiteId : siteId;
-		console.log(`[Agent Tools] Tool called: ${name} (site: ${targetSiteId})`);
+			siteId && crossSiteToolNames.has(name) && typeof argSiteId === 'string' && argSiteId ? argSiteId : siteId;
 
 		// Look up config fresh on every call so we always use the latest
 		// (e.g., after site start updates socket paths, PHP binary, etc.)
-		const config = registry.get(targetSiteId);
-		if (!config) {
-			const text =
-				targetSiteId === siteId
-					? `Site ${siteId} is no longer registered.`
-					: `Site ${targetSiteId} is not registered with Agent Tools. Use preview_list or list_sites to find ` +
-						'valid targets; previews register when preview_start completes.';
-			return {
-				content: [{ type: 'text', text }],
-				isError: true,
-			};
+		let config: SiteConfig | null = null;
+		if (targetSiteId) {
+			config = registry.get(targetSiteId) ?? null;
+			if (!config) {
+				const text =
+					targetSiteId === siteId
+						? `Site ${siteId} is no longer registered.`
+						: `Site ${targetSiteId} is not registered with Agent Tools. Use preview_list or list_sites to find ` +
+							'valid targets; previews register when preview_start completes.';
+				return {
+					content: [{ type: 'text', text }],
+					isError: true,
+				};
+			}
 		}
 
 		try {
@@ -202,6 +210,13 @@ function readBody(req: http.IncomingMessage): Promise<string> {
 // ---------------------------------------------------------------------------
 // URL Routing
 // ---------------------------------------------------------------------------
+
+/**
+ * The Local-wide endpoint. One path segment after /sites, so it can never collide
+ * with the two-segment per-site route below — even for a site whose id is "mcp",
+ * which lives at /sites/mcp/mcp.
+ */
+export const GLOBAL_MCP_PATH = '/sites/mcp';
 
 /** Extract siteId from URL path like /sites/{siteId}/mcp */
 function parseSiteId(url: string): string | null {
@@ -361,27 +376,37 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 			// Health check — no siteId enumeration; auth is already enforced above.
 			if (url === '/health' && method === 'GET') {
 				res.writeHead(200, { 'Content-Type': 'application/json' });
-				res.end(JSON.stringify({ status: 'ok', activeSessions: sessions.size }));
-				return;
-			}
-
-			// MCP endpoint: /sites/:siteId/mcp
-			const siteId = parseSiteId(url);
-			if (!siteId) {
-				res.writeHead(404, { 'Content-Type': 'application/json' });
-				res.end(JSON.stringify({ error: 'Not found. Use /sites/{siteId}/mcp' }));
-				return;
-			}
-
-			const config = registry.get(siteId);
-			if (!config) {
-				res.writeHead(404, { 'Content-Type': 'application/json' });
 				res.end(
-					JSON.stringify({
-						error: `Site not registered: ${siteId}. The site may not be running or Agent Tools may not be enabled.`,
-					}),
+					JSON.stringify({ status: 'ok', globalEndpoint: GLOBAL_MCP_PATH, activeSessions: sessions.size }),
 				);
 				return;
+			}
+
+			// Two MCP endpoints: the Local-wide one, and one per registered site.
+			// Both sit behind the auth and Host/Origin gates above.
+			// A global session has no bound site, so siteId stays null for it.
+			const isGlobal = url === GLOBAL_MCP_PATH;
+			let siteId: string | null = null;
+
+			if (!isGlobal) {
+				siteId = parseSiteId(url);
+				if (!siteId) {
+					res.writeHead(404, { 'Content-Type': 'application/json' });
+					res.end(JSON.stringify({ error: `Not found. Use ${GLOBAL_MCP_PATH} or /sites/{siteId}/mcp` }));
+					return;
+				}
+
+				if (!registry.get(siteId)) {
+					res.writeHead(404, { 'Content-Type': 'application/json' });
+					res.end(
+						JSON.stringify({
+							error:
+								`Site not registered: ${siteId}. Agent Tools may not be enabled for it — ` +
+								`enable it from Local, or call enable_agent_tools on ${GLOBAL_MCP_PATH}.`,
+						}),
+					);
+					return;
+				}
 			}
 
 			const sessionId = req.headers['mcp-session-id'] as string | undefined;
@@ -461,7 +486,11 @@ export function createMcpHttpServer(options: McpHttpServerOptions): http.Server 
 							siteId,
 							lastActivity: Date.now(),
 						});
-						console.log(`[Agent Tools] New MCP session ${newSessionId} for site ${siteId}`);
+						console.log(
+							`[Agent Tools] New MCP session ${newSessionId} for ${
+								siteId ? `site ${siteId}` : 'the global endpoint'
+							}`,
+						);
 					},
 				});
 
