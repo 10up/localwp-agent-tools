@@ -45,13 +45,80 @@ describe('MCP HTTP Server', () => {
 	let port: number;
 	const registry = new SiteConfigRegistry();
 
+	const mockStatus = {
+		id: 'test-site',
+		name: 'Test Site',
+		domain: 'test.local',
+		sitePath: '/tmp/test-site',
+		projectDir: '',
+		enabled: true,
+		agents: ['claude' as const],
+		registered: true,
+		mcpUrl: 'http://localhost:24842/sites/test-site/mcp',
+	};
+
 	const mockLocalApi: LocalApi = {
 		startSite: async () => ({ id: 'test', status: 'running' }),
 		stopSite: async () => ({ id: 'test', status: 'halted' }),
 		restartSite: async () => ({ id: 'test', status: 'running' }),
 		getSiteStatus: async () => ({ id: 'test', status: 'running' }),
 		listSites: async () => [],
+		createSite: async (opts) => ({
+			id: 'new-site',
+			name: opts.name,
+			domain: 'new-site.local',
+			path: '/tmp/new-site',
+			url: 'http://new-site.local',
+			status: 'adding',
+			phpVersion: '8.2.29',
+			database: 'mysql-8.4.0',
+			webServer: 'nginx-1.26.1',
+			multisite: 'none' as const,
+			wpAdminUsername: 'admin',
+			wpAdminPassword: 'admin',
+			wpAdminEmail: 'dev@local',
+			agentToolsEnabled: false,
+			pending: true,
+		}),
+		listServiceVersions: async () => ({ php: [], database: [], webServer: [], note: '' }),
+		enableAgentTools: async () => mockStatus,
+		disableAgentTools: async () => ({ ...mockStatus, enabled: false, mcpUrl: null }),
+		getAgentToolsStatus: async () => [mockStatus],
 	};
+
+	/** Run the MCP handshake against an endpoint and return its session id. */
+	async function initSession(path: string): Promise<string> {
+		const res = await makeRequest(port, {
+			method: 'POST',
+			path,
+			headers: { Accept: 'application/json, text/event-stream' },
+			body: JSON.stringify({
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'initialize',
+				params: {
+					protocolVersion: '2025-03-26',
+					capabilities: {},
+					clientInfo: { name: 'test', version: '1.0' },
+				},
+			}),
+		});
+		return res.headers['mcp-session-id'] as string;
+	}
+
+	/** Send a JSON-RPC request on an established session. */
+	async function rpc(path: string, sessionId: string, method: string, params: unknown = {}) {
+		const res = await makeRequest(port, {
+			method: 'POST',
+			path,
+			headers: {
+				Accept: 'application/json, text/event-stream',
+				'mcp-session-id': sessionId,
+			},
+			body: JSON.stringify({ jsonrpc: '2.0', id: 2, method, params }),
+		});
+		return JSON.parse(res.body);
+	}
 
 	beforeAll(async () => {
 		registry.register({
@@ -95,6 +162,7 @@ describe('MCP HTTP Server', () => {
 		const body = JSON.parse(res.body);
 		expect(body.status).toBe('ok');
 		expect(body.sites).toContain('test-site');
+		expect(body.globalEndpoint).toBe('/sites/mcp');
 	});
 
 	it('POST /sites/{siteId}/mcp with initialize creates session', async () => {
@@ -166,5 +234,85 @@ describe('MCP HTTP Server', () => {
 		expect(res.statusCode).toBe(400);
 		const body = JSON.parse(res.body);
 		expect(body.error.code).toBe(-32000);
+	});
+
+	// ── Global endpoint ─────────────────────────────────────────────────
+
+	describe('global endpoint /sites/mcp', () => {
+		it('accepts initialize without any site being registered', async () => {
+			const res = await makeRequest(port, {
+				method: 'POST',
+				path: '/sites/mcp',
+				headers: { Accept: 'application/json, text/event-stream' },
+				body: JSON.stringify({
+					jsonrpc: '2.0',
+					id: 1,
+					method: 'initialize',
+					params: {
+						protocolVersion: '2025-03-26',
+						capabilities: {},
+						clientInfo: { name: 'test', version: '1.0' },
+					},
+				}),
+			});
+			expect(res.statusCode).toBe(200);
+			expect(res.headers['mcp-session-id']).toBeDefined();
+		});
+
+		it('advertises the Local-wide tools but not the site-scoped ones', async () => {
+			const sessionId = await initSession('/sites/mcp');
+			const body = await rpc('/sites/mcp', sessionId, 'tools/list');
+			const names = body.result.tools.map((t: { name: string }) => t.name);
+
+			expect(names).toContain('list_sites');
+			expect(names).toContain('create_site');
+			expect(names).toContain('enable_agent_tools');
+			expect(names).toContain('disable_agent_tools');
+			expect(names).toContain('agent_tools_status');
+
+			expect(names).not.toContain('wp_cli');
+			expect(names).not.toContain('read_error_log');
+			expect(names).not.toContain('get_site_info');
+		});
+
+		it('runs a Local-wide tool with no bound site', async () => {
+			const sessionId = await initSession('/sites/mcp');
+			const body = await rpc('/sites/mcp', sessionId, 'tools/call', {
+				name: 'agent_tools_status',
+				arguments: {},
+			});
+			expect(body.result.content[0].text).toContain('test-site');
+		});
+
+		it('refuses a site-scoped tool and points at the per-site endpoint', async () => {
+			const sessionId = await initSession('/sites/mcp');
+			const body = await rpc('/sites/mcp', sessionId, 'tools/call', {
+				name: 'wp_cli',
+				arguments: { command: 'plugin list' },
+			});
+			expect(body.result.content[0].text).toContain('not available on the global endpoint');
+			expect(body.result.content[0].text).toContain('/sites/{siteId}/mcp');
+		});
+
+		it('still serves the full surface on a per-site endpoint', async () => {
+			const sessionId = await initSession('/sites/test-site/mcp');
+			const body = await rpc('/sites/test-site/mcp', sessionId, 'tools/list');
+			const names = body.result.tools.map((t: { name: string }) => t.name);
+
+			expect(names).toContain('wp_cli');
+			expect(names).toContain('list_sites');
+			expect(names).toContain('enable_agent_tools');
+		});
+
+		it('does not shadow a site whose id is literally "mcp"', async () => {
+			// /sites/mcp is the global route; a site called "mcp" lives at /sites/mcp/mcp.
+			const res = await makeRequest(port, {
+				method: 'POST',
+				path: '/sites/mcp/mcp',
+				body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
+			});
+			expect(res.statusCode).toBe(404);
+			expect(JSON.parse(res.body).error).toContain('Site not registered: mcp');
+		});
 	});
 });

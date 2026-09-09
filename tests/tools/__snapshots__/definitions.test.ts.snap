@@ -272,6 +272,65 @@ exports[`Tool definitions snapshot > matches the expected tool API surface 1`] =
     },
     "name": "create_site",
   },
+  {
+    "inputSchema": {
+      "properties": {
+        "agents": {
+          "description": "Which agents to configure. Optional — defaults to ["claude"].",
+          "items": {
+            "enum": [
+              "claude",
+              "cursor",
+              "windsurf",
+              "vscode",
+            ],
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "projectDir": {
+          "description": "Subdirectory of the site folder to write the agent config into, relative to the site root (e.g. "app/public/wp-content/themes/my-theme"). Optional — defaults to the site root. Must stay inside the site folder.",
+          "type": "string",
+        },
+        "siteId": {
+          "description": "The Local site ID. Use list_sites or agent_tools_status to find it.",
+          "type": "string",
+        },
+      },
+      "required": [
+        "siteId",
+      ],
+      "type": "object",
+    },
+    "name": "enable_agent_tools",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "siteId": {
+          "description": "The Local site ID. Use list_sites or agent_tools_status to find it.",
+          "type": "string",
+        },
+      },
+      "required": [
+        "siteId",
+      ],
+      "type": "object",
+    },
+    "name": "disable_agent_tools",
+  },
+  {
+    "inputSchema": {
+      "properties": {
+        "siteId": {
+          "description": "Optional — restrict the report to a single site.",
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "agent_tools_status",
+  },
 ]
 `;
 
@@ -347,6 +406,18 @@ Always confirm with the user before running these commands.",
   {
     "description": "Create a new WordPress site in Local. Provisions the site services and installs WordPress. Returns as soon as the site exists (usually within a second) — provisioning continues in the background and typically takes one to several minutes, longer when service binaries must be downloaded first. Poll site_status with the returned id until it reports "running". Pass wait:true to block until the site is fully ready instead. Note: unless Local is set to localhost router mode, Local will prompt the user for their administrator password to update /etc/hosts partway through.",
     "name": "create_site",
+  },
+  {
+    "description": "Enable Agent Tools on a Local site — registers it with this MCP server and writes its MCP config and project context files for the chosen agents. Same effect as clicking Enable in Local's UI. Returns the site's own MCP endpoint URL, which is the endpoint to use for site-scoped tools like wp_cli and the log readers.",
+    "name": "enable_agent_tools",
+  },
+  {
+    "description": "Disable Agent Tools on a Local site — unregisters it from this MCP server, closes its open MCP sessions, and removes the MCP config entry and project context it wrote. Leaves the site itself untouched. No-op if the site was not enabled.",
+    "name": "disable_agent_tools",
+  },
+  {
+    "description": "Report Agent Tools state for Local sites: whether it is enabled, which agents are configured, the project directory its config was written to, whether the site is currently registered with this MCP server, and the site's MCP endpoint URL. Omit siteId to report on every site.",
+    "name": "agent_tools_status",
   },
 ]
 `;
