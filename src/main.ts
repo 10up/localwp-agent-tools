@@ -45,7 +45,7 @@ interface AgentTargetConfig {
 	mcpConfigTopLevelKey: string;
 	/** Path to project context/instructions file, relative to project dir */
 	contextFilePath: string;
-	/** Extra entries to add to .gitignore */
+	/** Machine-generated config files to add to .gitignore (never the human-authored context file) */
 	gitignoreEntries: string[];
 }
 
@@ -67,21 +67,21 @@ const AGENT_TARGETS: Record<AgentTarget, AgentTargetConfig> = {
 		mcpConfigPath: CLAUDE_MCP_CONFIG_PATH,
 		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: 'CLAUDE.md',
-		gitignoreEntries: [...GITIGNORE_MCP_CONFIG_ENTRIES.claude, 'CLAUDE.md'],
+		gitignoreEntries: [...GITIGNORE_MCP_CONFIG_ENTRIES.claude],
 	},
 	cursor: {
 		label: 'Cursor',
 		mcpConfigPath: CURSOR_MCP_CONFIG_PATH,
 		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: '.cursorrules',
-		gitignoreEntries: [...GITIGNORE_MCP_CONFIG_ENTRIES.cursor, '.cursorrules'],
+		gitignoreEntries: [...GITIGNORE_MCP_CONFIG_ENTRIES.cursor],
 	},
 	windsurf: {
 		label: 'Windsurf',
 		mcpConfigPath: WINDSURF_MCP_CONFIG_PATH,
 		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: '.windsurfrules',
-		gitignoreEntries: [...GITIGNORE_MCP_CONFIG_ENTRIES.windsurf, '.windsurfrules'],
+		gitignoreEntries: [...GITIGNORE_MCP_CONFIG_ENTRIES.windsurf],
 	},
 	vscode: {
 		label: 'VS Code Copilot',

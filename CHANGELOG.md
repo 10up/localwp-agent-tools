@@ -13,6 +13,10 @@ All notable changes to this project will be documented in this file, per [the Ke
 - `list_service_versions` MCP tool — list the PHP, database, and web server versions available to `create_site`, flagging which are already installed versus downloaded on demand (props [@ivanlopez](https://github.com/ivanlopez) via [#80](https://github.com/10up/localwp-agent-tools/pull/80)).
 - `site_status` now reports a `creationError` when a site created with `create_site` failed during provisioning (props [@ivanlopez](https://github.com/ivanlopez) via [#80](https://github.com/10up/localwp-agent-tools/pull/80)).
 
+### Fixed
+
+- The add-on no longer adds each agent's context file (`CLAUDE.md`, `.cursorrules`, `.windsurfrules`) to the project's `.gitignore`. Those files are human-authored and usually committed; the add-on only writes a marked section into them, so ignoring them is misleading and does nothing for a file that is already tracked. Only the machine-generated MCP config files stay ignored (props [@claytoncollie](https://github.com/claytoncollie)).
+
 ### Security
 
 - Require an `Authorization: Bearer <token>` header on every MCP HTTP request. The token is a 64-character hex string, generated per install and stored at `~/.local-agent-tools/token` with mode `0600`, and the server checks it in constant time. The header is the only channel now; there is no `?token=` query parameter. Reported by [@AlexU-A](https://github.com/AlexU-A) (Zivtech) via [GHSA-79p7-m44g-38qx](https://github.com/10up/localwp-agent-tools/security/advisories/GHSA-79p7-m44g-38qx).
