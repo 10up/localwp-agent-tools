@@ -7,12 +7,15 @@ All notable changes to this project will be documented in this file, per [the Ke
 ## [0.3.1] - 2026-09-22
 
 ### Fixed
+
 - Stop adding agent context files to `.gitignore` ([#84](https://github.com/10up/localwp-agent-tools/pull/84)).
 
 ### Security
+
 - Added MCP request authentication and `Host` header validation ([GHSA-79p7-m44g-38qx](https://github.com/10up/localwp-agent-tools/security/advisories/GHSA-79p7-m44g-38qx)).
 
 ### Developer
+
 - Bump `brace-expansion` from 1.1.12 to 1.1.18 ([#83](https://github.com/10up/localwp-agent-tools/pull/83)).
 - Bump `electron` from 37.10.3 to 42.11.3 ([#83](https://github.com/10up/localwp-agent-tools/pull/83)).
 - Bump `highlight.js` from 9.18.5 to 11.12.0 ([#83](https://github.com/10up/localwp-agent-tools/pull/83)).
