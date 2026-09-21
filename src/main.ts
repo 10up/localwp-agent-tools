@@ -45,7 +45,7 @@ interface AgentTargetConfig {
 	mcpConfigTopLevelKey: string;
 	/** Path to project context/instructions file, relative to project dir */
 	contextFilePath: string;
-	/** Extra entries to add to .gitignore */
+	/** Machine-generated config files to add to .gitignore (never the human-authored context file) */
 	gitignoreEntries: string[];
 }
 
@@ -55,21 +55,21 @@ const AGENT_TARGETS: Record<AgentTarget, AgentTargetConfig> = {
 		mcpConfigPath: '.mcp.json',
 		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: 'CLAUDE.md',
-		gitignoreEntries: ['.mcp.json', 'CLAUDE.md'],
+		gitignoreEntries: ['.mcp.json'],
 	},
 	cursor: {
 		label: 'Cursor',
 		mcpConfigPath: path.join('.cursor', 'mcp.json'),
 		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: '.cursorrules',
-		gitignoreEntries: ['.cursorrules'],
+		gitignoreEntries: [],
 	},
 	windsurf: {
 		label: 'Windsurf',
 		mcpConfigPath: path.join('.windsurf', 'mcp.json'),
 		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: '.windsurfrules',
-		gitignoreEntries: ['.windsurfrules'],
+		gitignoreEntries: [],
 	},
 	vscode: {
 		label: 'VS Code Copilot',
