@@ -77,6 +77,11 @@ exports[`Tool definitions snapshot > matches the expected tool API surface 1`] =
   {
     "inputSchema": {
       "properties": {
+        "includeSecrets": {
+          "default": false,
+          "description": "Return real values for secrets, and allow raw output. Default false.",
+          "type": "boolean",
+        },
         "raw": {
           "default": false,
           "description": "If true, return the raw file content instead of parsed constants. Default false.",
@@ -282,6 +287,8 @@ exports[`Tool definitions snapshot > tool descriptions match snapshot 1`] = `
 
 Plugins and themes are loaded by default so plugin-provided commands (e.g. "elasticpress stats", "acf", "redis") work. If a specific plugin or theme is fatally erroring, pass "--skip-plugins=<slug>" / "--skip-themes=<slug>" (or the bare flags to skip all) to bypass it.
 
+BLOCKED: "eval", "eval-file", "shell", "db drop", "db reset", "db import", "site empty", "site delete", and the "--exec" / "--require" / "--ssh" / "--http" global flags are always rejected, even behind a leading flag like "--skip-plugins".
+
 WARNING: Some WP-CLI commands are destructive and should only be run after confirming with the user:
 - "eval" / "eval-file" / "shell" — execute arbitrary PHP code
 - "db drop" / "db reset" — destroy the database
@@ -305,7 +312,7 @@ Always confirm with the user before running these commands.",
     "name": "wp_debug_toggle",
   },
   {
-    "description": "Read and parse wp-config.php, extracting all define() constants and their values. Also shows the database table prefix.",
+    "description": "Read and parse wp-config.php, extracting all define() constants and their values. Also shows the database table prefix. Secrets (the database access secret and any constant ending in _KEY, _SALT, _SECRET, _TOKEN, or _PASS) are shown as [redacted] unless includeSecrets is true. raw output requires includeSecrets.",
     "name": "read_wp_config",
   },
   {

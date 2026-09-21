@@ -10,7 +10,7 @@ The following individuals are responsible for curating the list of issues, respo
 
 Thank you to all the people who have already contributed to this repository via bug reports, code, design, ideas, project management, translation, testing, etc.
 
-[Ricky Lee Whittemore (@rickalee)](https://github.com/rickalee), [Ian Dunn (@iandunn)](https://github.com/iandunn)
+[Ricky Lee Whittemore (@rickalee)](https://github.com/rickalee), [Ian Dunn (@iandunn)](https://github.com/iandunn), [Alex Urevick-Ackelsberg (@AlexU-A)](https://github.com/AlexU-A)
 
 ## Libraries
 

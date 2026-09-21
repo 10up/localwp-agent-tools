@@ -12,6 +12,15 @@ import {
 } from './helpers/paths';
 import { SiteConfig, SiteConfigRegistry } from './helpers/site-config';
 import { findAvailablePort, savePort, removePortFile, removePortFileSync } from './helpers/port';
+import { getOrCreateToken } from './helpers/auth';
+import {
+	AgentTarget,
+	MCP_SERVER_KEY,
+	GITIGNORE_MCP_CONFIG,
+	GITIGNORE_MCP_CONFIG_ENTRIES,
+	buildMcpServerEntry,
+	mergeMcpConfig,
+} from './helpers/mcp-config';
 import { createMcpHttpServer, startMcpHttpServer, stopMcpHttpServer, closeSessionsForSite } from './mcp-server';
 import { LocalApi, CreateSiteOptions, CreateSiteResult, ServiceVersion, ServiceVersions } from './tools';
 import {
@@ -27,15 +36,6 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-/** The key we use inside any mcpServers/servers object to identify our entry */
-const MCP_SERVER_KEY = 'local-wp';
-
-/**
- * Supported coding agent targets.
- * Each defines where MCP config and project context live.
- */
-type AgentTarget = 'claude' | 'cursor' | 'windsurf' | 'vscode';
-
 interface AgentTargetConfig {
 	/** Label for UI display */
 	label: string;
@@ -49,34 +49,46 @@ interface AgentTargetConfig {
 	gitignoreEntries: string[];
 }
 
+// MCP config filesystem paths are derived from the shared POSIX literals in
+// helpers/mcp-config.ts (GITIGNORE_MCP_CONFIG), via path.join, so the path we
+// read/write on disk and the path we write into .gitignore can never drift
+// apart. path.join gives the OS-correct separator here (e.g. `.cursor\mcp.json`
+// on Windows); the raw forward-slash literal is what must go into .gitignore
+// (see GITIGNORE_MCP_CONFIG_ENTRIES) — gitignore treats backslash as an escape
+// character, so a Windows-style path.join value would leave the file un-ignored.
+const CLAUDE_MCP_CONFIG_PATH = path.join(...GITIGNORE_MCP_CONFIG.claude.split('/'));
+const CURSOR_MCP_CONFIG_PATH = path.join(...GITIGNORE_MCP_CONFIG.cursor.split('/'));
+const WINDSURF_MCP_CONFIG_PATH = path.join(...GITIGNORE_MCP_CONFIG.windsurf.split('/'));
+const VSCODE_MCP_CONFIG_PATH = path.join(...GITIGNORE_MCP_CONFIG.vscode.split('/'));
+
 const AGENT_TARGETS: Record<AgentTarget, AgentTargetConfig> = {
 	claude: {
 		label: 'Claude Code',
-		mcpConfigPath: '.mcp.json',
+		mcpConfigPath: CLAUDE_MCP_CONFIG_PATH,
 		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: 'CLAUDE.md',
-		gitignoreEntries: ['.mcp.json'],
+		gitignoreEntries: [...GITIGNORE_MCP_CONFIG_ENTRIES.claude],
 	},
 	cursor: {
 		label: 'Cursor',
-		mcpConfigPath: path.join('.cursor', 'mcp.json'),
+		mcpConfigPath: CURSOR_MCP_CONFIG_PATH,
 		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: '.cursorrules',
-		gitignoreEntries: [],
+		gitignoreEntries: [...GITIGNORE_MCP_CONFIG_ENTRIES.cursor],
 	},
 	windsurf: {
 		label: 'Windsurf',
-		mcpConfigPath: path.join('.windsurf', 'mcp.json'),
+		mcpConfigPath: WINDSURF_MCP_CONFIG_PATH,
 		mcpConfigTopLevelKey: 'mcpServers',
 		contextFilePath: '.windsurfrules',
-		gitignoreEntries: [],
+		gitignoreEntries: [...GITIGNORE_MCP_CONFIG_ENTRIES.windsurf],
 	},
 	vscode: {
 		label: 'VS Code Copilot',
-		mcpConfigPath: path.join('.vscode', 'mcp.json'),
+		mcpConfigPath: VSCODE_MCP_CONFIG_PATH,
 		mcpConfigTopLevelKey: 'servers',
 		contextFilePath: path.join('.github', 'copilot-instructions.md'),
-		gitignoreEntries: [],
+		gitignoreEntries: [...GITIGNORE_MCP_CONFIG_ENTRIES.vscode],
 	},
 };
 
@@ -101,10 +113,27 @@ const CONTEXT_MARKER_END = '<!-- <<< Agent Tools -->';
 
 const siteConfigRegistry = new SiteConfigRegistry();
 let mcpServerPort = 0;
+let mcpAuthToken = '';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Guards every code path that writes an MCP config's Authorization header.
+ * If `getOrCreateToken()` threw at startup, `mcpAuthToken` stays `''` — call
+ * this first so we throw instead of writing a config with an empty Bearer
+ * token (which would be worse than no config at all: it looks configured
+ * but silently fails auth). Callers that run inside an IPC handler's
+ * try/catch surface this as an error result to the renderer.
+ */
+function requireAuthToken(): void {
+	if (!mcpAuthToken) {
+		const message = '[Agent Tools] MCP auth token unavailable; cannot write config';
+		console.warn(message);
+		throw new Error(message);
+	}
+}
 
 function getSitePath(site: Local.Site): string {
 	return resolveSitePath(site.longPath || site.path);
@@ -187,60 +216,10 @@ async function buildSiteConfig(site: Local.Site): Promise<SiteConfig> {
 
 // ---------------------------------------------------------------------------
 // MCP Config — Per-Agent HTTP Format
+//
+// `buildMcpServerEntry` and `mergeMcpConfig` live in ./helpers/mcp-config —
+// they're pure (no Local runtime imports) so they can be unit tested there.
 // ---------------------------------------------------------------------------
-
-/**
- * Builds the MCP server entry for a specific agent.
- * Each agent has different JSON shapes for HTTP MCP servers.
- */
-function buildMcpServerEntry(agent: AgentTarget, port: number, siteId: string): Record<string, any> {
-	const url = `http://localhost:${port}/sites/${siteId}/mcp`;
-
-	switch (agent) {
-		case 'claude':
-			return { type: 'http', url };
-		case 'cursor':
-			return { url };
-		case 'windsurf':
-			return { serverUrl: url };
-		case 'vscode':
-			return { type: 'http', url };
-	}
-}
-
-/**
- * Safely merges our MCP server entry into an existing MCP config file.
- * Creates the file (and parent directories) if it doesn't exist.
- * Preserves all other entries in the file.
- */
-async function mergeMcpConfig(
-	configPath: string,
-	serverEntry: Record<string, any>,
-	topLevelKey: string,
-): Promise<void> {
-	let existing: any = {};
-
-	if (await fs.pathExists(configPath)) {
-		try {
-			existing = await fs.readJSON(configPath);
-		} catch {
-			// File exists but isn't valid JSON — back it up before overwriting
-			const backupPath = configPath + '.backup';
-			await fs.copy(configPath, backupPath);
-			console.warn(`[Agent Tools] Backed up invalid JSON at ${configPath} to ${backupPath}`);
-			existing = {};
-		}
-	}
-
-	if (!existing[topLevelKey] || typeof existing[topLevelKey] !== 'object') {
-		existing[topLevelKey] = {};
-	}
-
-	existing[topLevelKey][MCP_SERVER_KEY] = serverEntry;
-
-	await fs.ensureDir(path.dirname(configPath));
-	await fs.writeJSON(configPath, existing, { spaces: 2 });
-}
 
 /**
  * Removes our MCP server entry from a config file.
@@ -410,6 +389,8 @@ async function updateGitignore(dirPath: string, agents: AgentTarget[]): Promise<
 // ---------------------------------------------------------------------------
 
 async function setupSite(site: Local.Site, notifier: any, projectDir: string, agents: AgentTarget[]): Promise<void> {
+	requireAuthToken();
+
 	const sitePath = getSitePath(site);
 	const projectPath = getProjectPath(sitePath, projectDir);
 
@@ -432,7 +413,7 @@ async function setupSite(site: Local.Site, notifier: any, projectDir: string, ag
 
 		// Write MCP config (HTTP format, per-agent shape)
 		const mcpConfigPath = path.join(projectPath, agentConfig.mcpConfigPath);
-		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
+		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id, mcpAuthToken);
 		await mergeMcpConfig(mcpConfigPath, serverEntry, agentConfig.mcpConfigTopLevelKey);
 
 		// Write project context
@@ -501,6 +482,8 @@ async function teardownSite(site: Local.Site, notifier: any): Promise<void> {
 }
 
 async function changeProjectDir(site: Local.Site, newProjectDir: string, notifier: any): Promise<void> {
+	requireAuthToken();
+
 	const sitePath = getSitePath(site);
 	const oldProjectDir = getStoredProjectDir(site);
 	const oldPath = getProjectPath(sitePath, oldProjectDir);
@@ -524,7 +507,7 @@ async function changeProjectDir(site: Local.Site, newProjectDir: string, notifie
 	for (const agent of agents) {
 		const agentConfig = AGENT_TARGETS[agent];
 
-		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
+		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id, mcpAuthToken);
 		await mergeMcpConfig(
 			path.join(newPath, agentConfig.mcpConfigPath),
 			serverEntry,
@@ -551,6 +534,7 @@ async function changeProjectDir(site: Local.Site, newProjectDir: string, notifie
 
 async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier: any): Promise<void> {
 	if (!isAgentToolsEnabled(site)) return;
+	requireAuthToken();
 
 	const sitePath = getSitePath(site);
 	const projectDir = getStoredProjectDir(site);
@@ -575,7 +559,7 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 		for (const agent of added) {
 			const agentConfig = AGENT_TARGETS[agent];
 
-			const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
+			const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id, mcpAuthToken);
 			await mergeMcpConfig(
 				path.join(projectPath, agentConfig.mcpConfigPath),
 				serverEntry,
@@ -603,8 +587,31 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 	});
 }
 
+/**
+ * Rewrites the MCP config file (config only — no context file) for each of
+ * the site's configured agents, using the current in-memory port and auth
+ * token. Shared by regenerateConfig() and the startup loop below, factored
+ * out so the startup loop doesn't also re-touch context files on every
+ * restart.
+ */
+async function writeMcpConfigsForSite(site: Local.Site, projectPath: string, agents: AgentTarget[]): Promise<void> {
+	requireAuthToken();
+
+	for (const agent of agents) {
+		const agentConfig = AGENT_TARGETS[agent];
+
+		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id, mcpAuthToken);
+		await mergeMcpConfig(
+			path.join(projectPath, agentConfig.mcpConfigPath),
+			serverEntry,
+			agentConfig.mcpConfigTopLevelKey,
+		);
+	}
+}
+
 async function regenerateConfig(site: Local.Site): Promise<void> {
 	if (!isAgentToolsEnabled(site)) return;
+	requireAuthToken();
 
 	const sitePath = getSitePath(site);
 	const projectDir = getStoredProjectDir(site);
@@ -615,19 +622,17 @@ async function regenerateConfig(site: Local.Site): Promise<void> {
 	const siteConfig = await buildSiteConfig(site);
 	siteConfigRegistry.register(siteConfig);
 
+	await writeMcpConfigsForSite(site, projectPath, agents);
+
 	const contextContent = generateProjectContext(site);
 
 	for (const agent of agents) {
 		const agentConfig = AGENT_TARGETS[agent];
 
-		const serverEntry = buildMcpServerEntry(agent, mcpServerPort, site.id);
-		await mergeMcpConfig(
-			path.join(projectPath, agentConfig.mcpConfigPath),
-			serverEntry,
-			agentConfig.mcpConfigTopLevelKey,
-		);
 		await writeContextFile(path.join(projectPath, agentConfig.contextFilePath), contextContent, agent);
 	}
+
+	await updateGitignore(projectPath, agents);
 }
 
 async function getStatus(site: Local.Site): Promise<AgentToolsStatus> {
@@ -979,7 +984,13 @@ export default function (context: LocalMain.AddonMainContext): void {
 	(async () => {
 		try {
 			mcpServerPort = await findAvailablePort();
-			httpServer = createMcpHttpServer({ registry: siteConfigRegistry, localApi });
+			mcpAuthToken = await getOrCreateToken();
+			httpServer = createMcpHttpServer({
+				registry: siteConfigRegistry,
+				localApi,
+				authToken: mcpAuthToken,
+				port: mcpServerPort,
+			});
 
 			try {
 				await startMcpHttpServer(httpServer, mcpServerPort);
@@ -990,7 +1001,12 @@ export default function (context: LocalMain.AddonMainContext): void {
 				if (code === 'EADDRINUSE') {
 					console.warn(`[Agent Tools] Port ${mcpServerPort} was taken, retrying with ${mcpServerPort + 1}`);
 					mcpServerPort += 1;
-					httpServer = createMcpHttpServer({ registry: siteConfigRegistry, localApi });
+					httpServer = createMcpHttpServer({
+						registry: siteConfigRegistry,
+						localApi,
+						authToken: mcpAuthToken,
+						port: mcpServerPort,
+					});
 					await startMcpHttpServer(httpServer, mcpServerPort);
 				} else {
 					throw listenErr;
@@ -1013,6 +1029,27 @@ export default function (context: LocalMain.AddonMainContext): void {
 							console.log(`[Agent Tools] Registered site: ${site.name}`);
 						} catch (err) {
 							console.error(`[Agent Tools] Failed to register site ${site.name}:`, err);
+							continue;
+						}
+
+						// Runs on every Local start: rewrite each enabled site's MCP
+						// config with this run's port and token, and refresh the ignore
+						// block so the token-bearing config files stay untracked. Running
+						// unconditionally is also what makes it the upgrade path from
+						// versions that wrote configs with no Authorization header — and
+						// ignore blocks with no per-agent config paths — so upgrading
+						// needs no manual step. Context files are deliberately untouched.
+						try {
+							const sitePath = getSitePath(site);
+							const projectDir = getStoredProjectDir(site);
+							const projectPath = getProjectPath(sitePath, projectDir);
+							const agents = getStoredAgents(site);
+
+							await writeMcpConfigsForSite(site, projectPath, agents);
+							await updateGitignore(projectPath, agents);
+							console.log(`[Agent Tools] Rewrote MCP config and .gitignore for site ${site.name}`);
+						} catch (err) {
+							console.warn(`[Agent Tools] Failed to rewrite MCP config for site ${site.name}:`, err);
 						}
 					}
 				}
@@ -1030,6 +1067,10 @@ export default function (context: LocalMain.AddonMainContext): void {
 				// Best-effort — process is exiting, no time to await
 				stopMcpHttpServer(httpServer);
 			}
+			// Port has a default fallback if the file is missing, so it's safe to
+			// clear on quit. The token has no such fallback: deleting it here would
+			// force every generated MCP config (which embeds the token) to go stale
+			// on every restart. The token is meant to persist across restarts.
 			removePortFileSync();
 		} catch {
 			// Best-effort cleanup

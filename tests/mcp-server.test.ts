@@ -3,42 +3,11 @@ import * as http from 'http';
 import { SiteConfigRegistry } from '../src/helpers/site-config';
 import { createMcpHttpServer, stopMcpHttpServer } from '../src/mcp-server';
 import type { LocalApi } from '../src/tools';
+import { getFreePort, makeRequest } from './test-utils';
 
-function makeRequest(
-	port: number,
-	options: { method: string; path: string; headers?: Record<string, string>; body?: string },
-): Promise<{ statusCode: number; headers: http.IncomingHttpHeaders; body: string }> {
-	return new Promise((resolve, reject) => {
-		const req = http.request(
-			{
-				hostname: '127.0.0.1',
-				port,
-				path: options.path,
-				method: options.method,
-				headers: {
-					'Content-Type': 'application/json',
-					...options.headers,
-				},
-			},
-			(res) => {
-				const chunks: Buffer[] = [];
-				res.on('data', (chunk: Buffer) => chunks.push(chunk));
-				res.on('end', () => {
-					resolve({
-						statusCode: res.statusCode || 0,
-						headers: res.headers,
-						body: Buffer.concat(chunks).toString('utf-8'),
-					});
-				});
-			},
-		);
-		req.on('error', reject);
-		if (options.body) {
-			req.write(options.body);
-		}
-		req.end();
-	});
-}
+const TEST_TOKEN = 'mcp-server-test-token';
+
+const AUTH_HEADERS = { Authorization: `Bearer ${TEST_TOKEN}` };
 
 describe('MCP HTTP Server', () => {
 	let server: http.Server;
@@ -73,15 +42,14 @@ describe('MCP HTTP Server', () => {
 			logPath: '/tmp/test-site/logs',
 		});
 
-		server = createMcpHttpServer({ registry, localApi: mockLocalApi });
-		// Use port 0 to let the OS assign a random available port
+		// The DNS-rebinding allowlist is scoped to a specific port, so unlike
+		// port 0 (OS-assigned), we need to know the port before creating the
+		// server — mirroring how main.ts picks a port before listening.
+		port = await getFreePort();
+		server = createMcpHttpServer({ registry, localApi: mockLocalApi, authToken: TEST_TOKEN, port });
 		await new Promise<void>((resolve, reject) => {
 			server.once('error', reject);
-			server.listen(0, '127.0.0.1', () => {
-				const addr = server.address();
-				port = typeof addr === 'object' && addr ? addr.port : 0;
-				resolve();
-			});
+			server.listen(port, '127.0.0.1', () => resolve());
 		});
 	});
 
@@ -90,11 +58,11 @@ describe('MCP HTTP Server', () => {
 	});
 
 	it('GET /health returns 200 with status ok', async () => {
-		const res = await makeRequest(port, { method: 'GET', path: '/health' });
+		const res = await makeRequest(port, { method: 'GET', path: '/health', headers: AUTH_HEADERS });
 		expect(res.statusCode).toBe(200);
 		const body = JSON.parse(res.body);
 		expect(body.status).toBe('ok');
-		expect(body.sites).toContain('test-site');
+		expect(body.activeSessions).toBeDefined();
 	});
 
 	it('POST /sites/{siteId}/mcp with initialize creates session', async () => {
@@ -102,6 +70,7 @@ describe('MCP HTTP Server', () => {
 			method: 'POST',
 			path: '/sites/test-site/mcp',
 			headers: {
+				...AUTH_HEADERS,
 				Accept: 'application/json, text/event-stream',
 			},
 			body: JSON.stringify({
@@ -127,6 +96,7 @@ describe('MCP HTTP Server', () => {
 		const res = await makeRequest(port, {
 			method: 'POST',
 			path: '/sites/test-site/mcp',
+			headers: AUTH_HEADERS,
 			body: '{invalid json',
 		});
 		expect(res.statusCode).toBe(400);
@@ -138,6 +108,7 @@ describe('MCP HTTP Server', () => {
 		const res = await makeRequest(port, {
 			method: 'POST',
 			path: '/sites/nonexistent/mcp',
+			headers: AUTH_HEADERS,
 			body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
 		});
 		expect(res.statusCode).toBe(404);
@@ -147,13 +118,14 @@ describe('MCP HTTP Server', () => {
 		const res = await makeRequest(port, {
 			method: 'PUT',
 			path: '/sites/test-site/mcp',
+			headers: AUTH_HEADERS,
 			body: '{}',
 		});
 		expect(res.statusCode).toBe(405);
 	});
 
 	it('GET on unknown path returns 404', async () => {
-		const res = await makeRequest(port, { method: 'GET', path: '/unknown' });
+		const res = await makeRequest(port, { method: 'GET', path: '/unknown', headers: AUTH_HEADERS });
 		expect(res.statusCode).toBe(404);
 	});
 
@@ -161,6 +133,7 @@ describe('MCP HTTP Server', () => {
 		const res = await makeRequest(port, {
 			method: 'POST',
 			path: '/sites/test-site/mcp',
+			headers: AUTH_HEADERS,
 			body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
 		});
 		expect(res.statusCode).toBe(400);

@@ -8,13 +8,18 @@ export const toolDefinitions = [
 	{
 		name: 'read_wp_config',
 		description:
-			'Read and parse wp-config.php, extracting all define() constants and their values. Also shows the database table prefix.',
+			'Read and parse wp-config.php, extracting all define() constants and their values. Also shows the database table prefix. Secrets (the database access secret and any constant ending in _KEY, _SALT, _SECRET, _TOKEN, or _PASS) are shown as [redacted] unless includeSecrets is true. raw output requires includeSecrets.',
 		inputSchema: {
 			type: 'object' as const,
 			properties: {
 				raw: {
 					type: 'boolean',
 					description: 'If true, return the raw file content instead of parsed constants. Default false.',
+					default: false,
+				},
+				includeSecrets: {
+					type: 'boolean',
+					description: 'Return real values for secrets, and allow raw output. Default false.',
 					default: false,
 				},
 			},
@@ -68,6 +73,19 @@ async function handleReadWpConfig(
 	args: Record<string, unknown>,
 	config: SiteConfig,
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
+	const includeSecrets = args.includeSecrets === true;
+
+	if (args.raw === true && includeSecrets !== true) {
+		return {
+			content: [
+				{
+					type: 'text',
+					text: 'raw output cannot be redacted reliably. Pass includeSecrets: true to get the full file, or omit raw to get parsed constants with secrets redacted.',
+				},
+			],
+		};
+	}
+
 	const configPath = path.join(config.wpPath, 'wp-config.php');
 
 	if (!existsSync(configPath)) {
@@ -82,7 +100,7 @@ async function handleReadWpConfig(
 		return { content: [{ type: 'text', text: content }] };
 	}
 
-	const constants = parseDefineConstants(content);
+	const constants = redactConstants(parseDefineConstants(content), includeSecrets);
 
 	const prefixMatch = content.match(/\$table_prefix\s*=\s*['"]([^'"]+)['"]/);
 	const tablePrefix = prefixMatch ? prefixMatch[1] : null;
@@ -184,6 +202,40 @@ async function handleEditWpConfig(
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
+
+const REDACTED = '[redacted]';
+
+/**
+ * A constant is treated as a secret when its name — compared
+ * case-insensitively — is DB_PASSWORD, or it ends with _KEY, _SALT,
+ * _PASSWORD, _SECRET, _TOKEN, or _PASS (covers AUTH_KEY, SECURE_AUTH_KEY,
+ * LOGGED_IN_KEY, NONCE_KEY and their *_SALT counterparts, plus third-party
+ * credentials like STRIPE_SECRET, SMTP_PASS, API_TOKEN, and
+ * WP_REDIS_PASSWORD), or it starts with NONCE_.
+ */
+export function isSecretConstant(name: string): boolean {
+	const upper = name.toUpperCase();
+	return (
+		upper === 'DB_PASSWORD' ||
+		upper.endsWith('_KEY') ||
+		upper.endsWith('_SALT') ||
+		upper.endsWith('_PASSWORD') ||
+		upper.endsWith('_SECRET') ||
+		upper.endsWith('_TOKEN') ||
+		upper.endsWith('_PASS') ||
+		upper.startsWith('NONCE_')
+	);
+}
+
+function redactConstants(constants: Record<string, string>, includeSecrets: boolean): Record<string, string> {
+	if (includeSecrets) return constants;
+
+	const redacted: Record<string, string> = {};
+	for (const [name, value] of Object.entries(constants)) {
+		redacted[name] = isSecretConstant(name) ? REDACTED : value;
+	}
+	return redacted;
+}
 
 export function parseDefineConstants(content: string): Record<string, string> {
 	const constants: Record<string, string> = {};
