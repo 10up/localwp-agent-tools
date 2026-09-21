@@ -12,8 +12,23 @@ import {
 } from './helpers/paths';
 import { SiteConfig, SiteConfigRegistry } from './helpers/site-config';
 import { findAvailablePort, savePort, removePortFile, removePortFileSync } from './helpers/port';
-import { createMcpHttpServer, startMcpHttpServer, stopMcpHttpServer, closeSessionsForSite } from './mcp-server';
-import { LocalApi, CreateSiteOptions, CreateSiteResult, ServiceVersion, ServiceVersions } from './tools';
+import {
+	createMcpHttpServer,
+	startMcpHttpServer,
+	stopMcpHttpServer,
+	closeSessionsForSite,
+	GLOBAL_MCP_PATH,
+} from './mcp-server';
+import {
+	LocalApi,
+	CreateSiteOptions,
+	CreateSiteResult,
+	ServiceVersion,
+	ServiceVersions,
+	AgentToolsSiteStatus,
+	EnableAgentToolsOptions,
+	AgentName,
+} from './tools';
 import {
 	BUILT_IN_SITE_DEFAULTS,
 	NewSiteDefaults,
@@ -193,8 +208,12 @@ async function buildSiteConfig(site: Local.Site): Promise<SiteConfig> {
  * Builds the MCP server entry for a specific agent.
  * Each agent has different JSON shapes for HTTP MCP servers.
  */
+function buildSiteMcpUrl(port: number, siteId: string): string {
+	return `http://localhost:${port}/sites/${siteId}/mcp`;
+}
+
 function buildMcpServerEntry(agent: AgentTarget, port: number, siteId: string): Record<string, any> {
-	const url = `http://localhost:${port}/sites/${siteId}/mcp`;
+	const url = buildSiteMcpUrl(port, siteId);
 
 	switch (agent) {
 		case 'claude':
@@ -603,6 +622,44 @@ async function updateAgents(site: Local.Site, newAgents: AgentTarget[], notifier
 	});
 }
 
+/**
+ * Enable Agent Tools on a site, or re-apply it to one that is already enabled.
+ *
+ * setupSite() only ever adds files, so it cannot be reused verbatim for a site
+ * that is already enabled: moving the project dir would strand config at the old
+ * location, and narrowing the agent list would strand the dropped agents' files.
+ * changeProjectDir() and updateAgents() are the paths that clean up after
+ * themselves, so route through them and let regenerateConfig() refresh the rest.
+ */
+async function applyAgentToolsSetup(
+	site: Local.Site,
+	notifier: any,
+	projectDir: string,
+	agents: AgentTarget[],
+): Promise<void> {
+	if (!isAgentToolsEnabled(site)) {
+		await setupSite(site, notifier, projectDir, agents);
+		return;
+	}
+
+	// Move first, using the stored agent set, so the files that move are the ones
+	// that currently exist. Each step writes through SiteData, so re-read between
+	// them or the next step would persist stale customOptions.
+	let current = site;
+
+	if (getStoredProjectDir(current) !== projectDir) {
+		await changeProjectDir(current, projectDir, notifier);
+		current = LocalMain.SiteData.getSite(site.id) ?? current;
+	}
+
+	await updateAgents(current, agents, notifier);
+	current = LocalMain.SiteData.getSite(site.id) ?? current;
+
+	// Rewrite MCP config and context for the resulting agent set — updateAgents
+	// only touches the agents that changed.
+	await regenerateConfig(current);
+}
+
 async function regenerateConfig(site: Local.Site): Promise<void> {
 	if (!isAgentToolsEnabled(site)) return;
 
@@ -654,6 +711,33 @@ async function getStatus(site: Local.Site): Promise<AgentToolsStatus> {
 		projectDir,
 		agents,
 	};
+}
+
+/**
+ * Agent Tools state for one site, as reported over the global MCP endpoint.
+ * Reads straight from SiteData, so it is accurate for sites that were never enabled.
+ */
+function describeAgentToolsStatus(site: Local.Site): AgentToolsSiteStatus {
+	const enabled = isAgentToolsEnabled(site);
+
+	return {
+		id: site.id,
+		name: site.name,
+		domain: site.domain || '',
+		sitePath: getSitePath(site),
+		projectDir: getStoredProjectDir(site),
+		enabled,
+		agents: getStoredAgents(site) as AgentName[],
+		registered: siteConfigRegistry.has(site.id),
+		mcpUrl: enabled && mcpServerPort ? buildSiteMcpUrl(mcpServerPort, site.id) : null,
+	};
+}
+
+/** Look up a site by id, with a consistent error for the MCP tools. */
+function requireSite(siteId: string): Local.Site {
+	const site = LocalMain.SiteData.getSite(siteId);
+	if (!site) throw new Error(`Site not found: ${siteId}. Use list_sites to see available site IDs.`);
+	return site;
 }
 
 // ---------------------------------------------------------------------------
@@ -714,8 +798,10 @@ async function waitForSiteByDomain(domain: string, timeoutMs = 5_000): Promise<L
 const siteCreationFailures = new Map<string, string>();
 
 interface LocalApiOptions {
-	/** Enables Agent Tools on a freshly created site. Wired to setupSite() by the add-on entry point. */
-	enableAgentTools(site: Local.Site, agents: AgentTarget[]): Promise<void>;
+	/** Enables Agent Tools on a site. Wired to setupSite() by the add-on entry point. */
+	enableAgentTools(site: Local.Site, agents: AgentTarget[], projectDir?: string): Promise<void>;
+	/** Disables Agent Tools on a site. Wired to teardownSite() by the add-on entry point. */
+	disableAgentTools(site: Local.Site): Promise<void>;
 }
 
 function createLocalApi(options: LocalApiOptions): LocalApi {
@@ -960,6 +1046,40 @@ function createLocalApi(options: LocalApiOptions): LocalApi {
 
 			return describe(site, true);
 		},
+
+		async enableAgentTools({ siteId, agents, projectDir }: EnableAgentToolsOptions) {
+			const site = requireSite(siteId);
+			const targets = (agents?.length ? agents : ['claude']) as AgentTarget[];
+
+			await options.enableAgentTools(site, targets, projectDir ?? '');
+
+			// setupSite writes customOptions through SiteData, so re-read to report
+			// the state that was actually persisted.
+			return describeAgentToolsStatus(LocalMain.SiteData.getSite(siteId) ?? site);
+		},
+
+		async disableAgentTools(siteId: string) {
+			const site = requireSite(siteId);
+
+			// Idempotent: teardown on a site that was never enabled would still
+			// rewrite its .gitignore and fire a misleading notification.
+			if (!isAgentToolsEnabled(site)) {
+				return describeAgentToolsStatus(site);
+			}
+
+			await options.disableAgentTools(site);
+
+			return describeAgentToolsStatus(LocalMain.SiteData.getSite(siteId) ?? site);
+		},
+
+		async getAgentToolsStatus(siteId?: string) {
+			if (siteId) {
+				return [describeAgentToolsStatus(requireSite(siteId))];
+			}
+
+			const sites = LocalMain.SiteData.getSites();
+			return (Object.values(sites) as Local.Site[]).map(describeAgentToolsStatus);
+		},
 	};
 }
 
@@ -972,7 +1092,8 @@ export default function (context: LocalMain.AddonMainContext): void {
 
 	let httpServer: ReturnType<typeof createMcpHttpServer> | null = null;
 	const localApi = createLocalApi({
-		enableAgentTools: (site, agents) => setupSite(site, notifier, '', agents),
+		enableAgentTools: (site, agents, projectDir) => applyAgentToolsSetup(site, notifier, projectDir ?? '', agents),
+		disableAgentTools: (site) => teardownSite(site, notifier),
 	});
 
 	// Start the MCP HTTP server
@@ -998,6 +1119,11 @@ export default function (context: LocalMain.AddonMainContext): void {
 			}
 
 			await savePort(mcpServerPort);
+
+			console.log(
+				`[Agent Tools] Global endpoint: http://localhost:${mcpServerPort}${GLOBAL_MCP_PATH} ` +
+					`(per-site: http://localhost:${mcpServerPort}/sites/{siteId}/mcp)`,
+			);
 
 			// Register configs for all sites with Agent Tools enabled (regardless of running status).
 			// This ensures the MCP endpoint is always reachable — tools that need the site

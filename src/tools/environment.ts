@@ -64,6 +64,30 @@ export interface ServiceVersions {
 	note: string;
 }
 
+/** Agent Tools enablement state for one Local site. */
+export interface AgentToolsSiteStatus {
+	id: string;
+	name: string;
+	domain: string;
+	sitePath: string;
+	/** Subdirectory the agent config was written to, relative to the site root. Empty means site root. */
+	projectDir: string;
+	enabled: boolean;
+	agents: AgentName[];
+	/** True when the site is currently registered with the MCP server, so its endpoint is live. */
+	registered: boolean;
+	/** The site's own MCP endpoint, or null when Agent Tools is not enabled for it. */
+	mcpUrl: string | null;
+}
+
+export interface EnableAgentToolsOptions {
+	siteId: string;
+	/** Defaults to ["claude"] when omitted. */
+	agents?: AgentName[];
+	/** Relative to the site root. Empty or omitted means the site root. */
+	projectDir?: string;
+}
+
 export interface LocalApi {
 	startSite(siteId: string): Promise<{ id: string; name?: string; status: string; message?: string }>;
 	stopSite(siteId: string): Promise<{ id: string; name?: string; status: string; message?: string }>;
@@ -79,6 +103,12 @@ export interface LocalApi {
 	listSites(): Promise<Array<{ id: string; name: string; domain: string; path: string; status: string }>>;
 	createSite(options: CreateSiteOptions): Promise<CreateSiteResult>;
 	listServiceVersions(): Promise<ServiceVersions>;
+	/** Enables Agent Tools on an existing site, writing its MCP config and project context. */
+	enableAgentTools(options: EnableAgentToolsOptions): Promise<AgentToolsSiteStatus>;
+	/** Disables Agent Tools on a site, removing what it wrote. Idempotent. */
+	disableAgentTools(siteId: string): Promise<AgentToolsSiteStatus>;
+	/** Reports Agent Tools state for one site, or for every site when siteId is omitted. */
+	getAgentToolsStatus(siteId?: string): Promise<AgentToolsSiteStatus[]>;
 }
 
 // ── Tool Definitions ───────────────────────────────────────────────────
@@ -267,7 +297,7 @@ export const toolDefinitions = [
 export async function handleTool(
 	name: string,
 	args: Record<string, unknown>,
-	config: SiteConfig,
+	config: SiteConfig | null,
 	localApi: LocalApi,
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
 	try {
@@ -299,10 +329,11 @@ export async function handleTool(
 async function handleSiteAction(
 	action: 'start' | 'stop' | 'restart' | 'status',
 	args: Record<string, unknown>,
-	config: SiteConfig,
+	config: SiteConfig | null,
 	localApi: LocalApi,
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
-	const siteId = (args.siteId as string) || config.siteId;
+	// On the global endpoint there is no bound site, so siteId is mandatory there.
+	const siteId = (args.siteId as string) || config?.siteId;
 
 	if (!siteId) {
 		return {
