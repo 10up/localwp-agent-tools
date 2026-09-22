@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file, per [the Ke
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-22
+
+### Fixed
+
+- Stop adding agent context files to `.gitignore` ([#84](https://github.com/10up/localwp-agent-tools/pull/84)).
+
+### Security
+
+- Added MCP request authentication and `Host` header validation ([GHSA-79p7-m44g-38qx](https://github.com/10up/localwp-agent-tools/security/advisories/GHSA-79p7-m44g-38qx)).
+
+### Developer
+
+- Bump `brace-expansion` from 1.1.12 to 1.1.18 ([#83](https://github.com/10up/localwp-agent-tools/pull/83)).
+- Bump `electron` from 37.10.3 to 42.11.3 ([#83](https://github.com/10up/localwp-agent-tools/pull/83)).
+- Bump `highlight.js` from 9.18.5 to 11.12.0 ([#83](https://github.com/10up/localwp-agent-tools/pull/83)).
+- Bump `@humanfs/node` from 0.16.7 to 0.16.8 ([#83](https://github.com/10up/localwp-agent-tools/pull/83)).
+- Bump `ip-address` from 10.1.0 to 10.7.0 ([#83](https://github.com/10up/localwp-agent-tools/pull/83)).
+- Bump `@vitest/mocker` from 4.1.0 to 4.1.11 ([#83](https://github.com/10up/localwp-agent-tools/pull/83)).
+
 ## [0.3.0] - 2026-09-04
 
 ### Added
@@ -89,6 +108,7 @@ All notable changes to this project will be documented in this file, per [the Ke
 - Check `wp-content/debug.log` when reading PHP error logs with WP_DEBUG_LOG enabled (props [@iandunn](https://github.com/iandunn) via [#5](https://github.com/10up/localwp-agent-tools/issues/5)).
 
 [Unreleased]: https://github.com/10up/localwp-agent-tools/compare/v0.3.0...HEAD
+[0.3.1]: https://github.com/10up/localwp-agent-tools/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/10up/localwp-agent-tools/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/10up/localwp-agent-tools/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/10up/localwp-agent-tools/compare/v0.1.0...v0.2.0
