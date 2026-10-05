@@ -104,7 +104,14 @@ describe('MCP HTTP Server: bearer auth + DNS-rebinding protection', () => {
 	// method/path pair may reach a route without the token.
 	describe('no method on any path is reachable without the token', () => {
 		const methods = ['GET', 'POST', 'DELETE', 'PUT', 'OPTIONS', 'HEAD'];
-		const paths = ['/health', '/sites/test-site/mcp', '/sites/unknown/mcp', '/nope'];
+		const paths = [
+			'/health',
+			'/sites/test-site/mcp',
+			'/sites/unknown/mcp',
+			'/sites/mcp',
+			'/sites/mcp/mcp',
+			'/nope',
+		];
 
 		for (const method of methods) {
 			for (const path of paths) {
@@ -335,6 +342,87 @@ describe('MCP HTTP Server: bearer auth + DNS-rebinding protection', () => {
 		});
 	});
 
+	// The global endpoint /sites/mcp has no bound site, but it sits behind the
+	// same gates. A live global session must never let a request skip auth.
+	describe('global endpoint session — every method still requires Authorization', () => {
+		let sessionId: string;
+
+		beforeAll(async () => {
+			const res = await makeRequest(port, {
+				method: 'POST',
+				path: '/sites/mcp',
+				headers: { ...AUTH_HEADERS, Accept: 'application/json, text/event-stream' },
+				body: JSON.stringify({
+					jsonrpc: '2.0',
+					id: 1,
+					method: 'initialize',
+					params: {
+						protocolVersion: '2025-03-26',
+						capabilities: {},
+						clientInfo: { name: 'test', version: '1.0' },
+					},
+				}),
+			});
+			expect(res.statusCode).toBe(200);
+			sessionId = res.headers['mcp-session-id'] as string;
+			expect(sessionId).toBeDefined();
+		});
+
+		it('rejects initialize on the global endpoint with no Authorization header', async () => {
+			const res = await makeRequest(port, {
+				method: 'POST',
+				path: '/sites/mcp',
+				headers: { Accept: 'application/json, text/event-stream' },
+				body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
+			});
+			expect(res.statusCode).toBe(401);
+			expect(JSON.parse(res.body)).toEqual(UNAUTHORIZED_BODY);
+		});
+
+		it('rejects initialize on the global endpoint with the wrong token', async () => {
+			const res = await makeRequest(port, {
+				method: 'POST',
+				path: '/sites/mcp',
+				headers: { Authorization: 'Bearer wrong-token', Accept: 'application/json, text/event-stream' },
+				body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
+			});
+			expect(res.statusCode).toBe(401);
+		});
+
+		it('rejects a management tool call on a live global session with no Authorization header', async () => {
+			const res = await makeRequest(port, {
+				method: 'POST',
+				path: '/sites/mcp',
+				headers: { 'mcp-session-id': sessionId, Accept: 'application/json, text/event-stream' },
+				body: JSON.stringify({
+					jsonrpc: '2.0',
+					id: 2,
+					method: 'tools/call',
+					params: { name: 'enable_agent_tools', arguments: { siteId: 'test-site' } },
+				}),
+			});
+			expect(res.statusCode).toBe(401);
+		});
+
+		it('rejects a GET (SSE stream) on a live global session with no Authorization header', async () => {
+			const res = await makeRequest(port, {
+				method: 'GET',
+				path: '/sites/mcp',
+				headers: { 'mcp-session-id': sessionId },
+			});
+			expect(res.statusCode).toBe(401);
+		});
+
+		it('rejects a DELETE on a live global session with no Authorization header', async () => {
+			const res = await makeRequest(port, {
+				method: 'DELETE',
+				path: '/sites/mcp',
+				headers: { 'mcp-session-id': sessionId },
+			});
+			expect(res.statusCode).toBe(401);
+		});
+	});
+
 	// Both rebinding layers — our own Host/Origin gate and the SDK's
 	// `allowedHosts`/`allowedOrigins` on the transport — have to accept and
 	// reject the same set. They do the same exact compare against the same two
@@ -384,7 +472,7 @@ describe('MCP HTTP Server: bearer auth + DNS-rebinding protection', () => {
 			});
 		}
 
-		it.each(rows)('%s → %d on /health and on the MCP route', async (_label, expected, buildHeaders) => {
+		it.each(rows)('%s → %d on /health and on both MCP routes', async (_label, expected, buildHeaders) => {
 			const rowHeaders = buildHeaders(port);
 
 			const health = await makeRequest(port, {
@@ -404,13 +492,26 @@ describe('MCP HTTP Server: bearer auth + DNS-rebinding protection', () => {
 				body: initializeBody(),
 			});
 
+			const globalMcp = await makeRequest(port, {
+				method: 'POST',
+				path: '/sites/mcp',
+				headers: {
+					...AUTH_HEADERS,
+					Accept: 'application/json, text/event-stream',
+					...rowHeaders,
+				},
+				body: initializeBody(),
+			});
+
 			expect(health.statusCode).toBe(expected);
 			expect(mcp.statusCode).toBe(health.statusCode);
+			expect(globalMcp.statusCode).toBe(health.statusCode);
 
 			if (expected === 200) {
-				// A 200 on the MCP route only counts if the handshake actually
+				// A 200 on an MCP route only counts if the handshake actually
 				// completed — the transport's own check has to have passed too.
 				expect(mcp.headers['mcp-session-id']).toBeDefined();
+				expect(globalMcp.headers['mcp-session-id']).toBeDefined();
 			} else {
 				expect(JSON.parse(health.body)).toEqual({ error: 'Forbidden host' });
 				expect(health.headers['cache-control']).toBe('no-store');
@@ -421,7 +522,7 @@ describe('MCP HTTP Server: bearer auth + DNS-rebinding protection', () => {
 		// server-side parser rejects an HTTP/1.1 request without one before our
 		// handler runs, so the missing-Host row needs a raw HTTP/1.0 request.
 		// The gate rejects before any body is read, so no body is needed.
-		it('missing Host header → 403 on /health and on the MCP route', async () => {
+		it('missing Host header → 403 on /health and on both MCP routes', async () => {
 			const health = await makeRawRequest(port, {
 				method: 'GET',
 				path: '/health',
@@ -433,8 +534,15 @@ describe('MCP HTTP Server: bearer auth + DNS-rebinding protection', () => {
 				headers: AUTH_HEADERS,
 			});
 
+			const globalMcp = await makeRawRequest(port, {
+				method: 'POST',
+				path: '/sites/mcp',
+				headers: AUTH_HEADERS,
+			});
+
 			expect(health.statusCode).toBe(403);
 			expect(mcp.statusCode).toBe(403);
+			expect(globalMcp.statusCode).toBe(403);
 		});
 	});
 });
