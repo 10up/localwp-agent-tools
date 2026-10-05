@@ -1374,6 +1374,9 @@ export default function (context: LocalMain.AddonMainContext): void {
 						// versions that wrote configs with no Authorization header — and
 						// ignore blocks with no per-agent config paths — so upgrading
 						// needs no manual step. Context files are deliberately untouched.
+						// Previews are registered above but never get MCP configs of
+						// their own, so skip them here.
+						if (!isAgentToolsEnabled(site)) continue;
 						try {
 							const sitePath = getSitePath(site);
 							const projectDir = getStoredProjectDir(site);
