@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { splitArgs, isBlockedCommand } from '../src/tools/wpcli';
-import { allToolDefinitions } from '../src/tools';
+import { allToolDefinitions, globalToolDefinitions } from '../src/tools';
 
 describe('Security: isBlockedCommand', () => {
 	it('blocks eval', () => {
@@ -139,5 +139,34 @@ describe('Security: input validation in edit_wp_config', () => {
 		expect(validValue.test('exec("whoami")')).toBe(false);
 		expect(validValue.test("true); echo file_get_contents('/etc/passwd'")).toBe(false);
 		expect(validValue.test('rm -rf /')).toBe(false);
+	});
+});
+
+describe('Security: the global endpoint serves only Local-wide tools', () => {
+	// /sites/mcp has no bound site. A tool that reads or writes one site's files
+	// or database must stay on that site's own endpoint.
+	const SITE_SCOPED = [
+		'wp_cli',
+		'read_error_log',
+		'read_access_log',
+		'read_wp_config',
+		'edit_wp_config',
+		'wp_debug_toggle',
+		'get_site_info',
+		'site_health_check',
+	];
+
+	it('advertises no site-scoped tool', () => {
+		const names = globalToolDefinitions.map((t) => t.name);
+		for (const name of SITE_SCOPED) {
+			expect(names).not.toContain(name);
+		}
+	});
+
+	it('is a subset of the per-site surface, so the credential check above covers it', () => {
+		const all = new Set(allToolDefinitions.map((t) => t.name));
+		for (const tool of globalToolDefinitions) {
+			expect(all.has(tool.name)).toBe(true);
+		}
 	});
 });

@@ -477,9 +477,13 @@ async function teardownSite(site: Local.Site, notifier: any): Promise<void> {
 	const projectPath = getProjectPath(sitePath, projectDir);
 	const agents = getStoredAgents(site);
 
-	// 1. Unregister from config registry and close MCP sessions
-	siteConfigRegistry.unregister(site.id);
-	closeSessionsForSite(site.id);
+	// 1. Unregister from config registry and close MCP sessions. A preview stays
+	// registered: preview_start handed out its endpoint, and the startup loop
+	// registers every preview whether or not Agent Tools is enabled on it.
+	if (!isPreviewSite(site)) {
+		siteConfigRegistry.unregister(site.id);
+		closeSessionsForSite(site.id);
+	}
 
 	// 2. Remove legacy .agent-tools/ directory if present (from old stdio architecture)
 	await fs.remove(path.join(sitePath, '.agent-tools'));

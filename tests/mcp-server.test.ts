@@ -259,6 +259,9 @@ describe('MCP HTTP Server', () => {
 			expect(names).toContain('enable_agent_tools');
 			expect(names).toContain('disable_agent_tools');
 			expect(names).toContain('agent_tools_status');
+			expect(names).toContain('preview_start');
+			expect(names).toContain('preview_list');
+			expect(names).toContain('preview_destroy');
 
 			expect(names).not.toContain('wp_cli');
 			expect(names).not.toContain('read_error_log');
@@ -282,6 +285,47 @@ describe('MCP HTTP Server', () => {
 			});
 			expect(body.result.content[0].text).toContain('not available on the global endpoint');
 			expect(body.result.content[0].text).toContain('/sites/{siteId}/mcp');
+		});
+
+		it('refuses a site-scoped tool even when it names a siteId', async () => {
+			const sessionId = await initSession('/sites/mcp');
+			const body = await rpc('/sites/mcp', sessionId, 'tools/call', {
+				name: 'wp_cli',
+				arguments: { command: 'plugin list', siteId: 'test-site' },
+			});
+			expect(body.result.content[0].text).toContain('not available on the global endpoint');
+		});
+
+		it('refuses preview_start without a siteId, since no site is bound', async () => {
+			const sessionId = await initSession('/sites/mcp');
+			const body = await rpc('/sites/mcp', sessionId, 'tools/call', {
+				name: 'preview_start',
+				arguments: { label: 'fix' },
+			});
+			expect(body.result.content[0].text).toContain('preview_start needs a siteId on the global endpoint');
+		});
+
+		it('runs preview_start with an explicit siteId', async () => {
+			const sessionId = await initSession('/sites/mcp');
+			const body = await rpc('/sites/mcp', sessionId, 'tools/call', {
+				name: 'preview_start',
+				arguments: { siteId: 'test-site', label: 'fix' },
+			});
+			const result = JSON.parse(body.result.content[0].text);
+			expect(result.parentSiteId).toBe('test-site');
+			expect(result.mcpUrl).toContain('/sites/preview-site/mcp');
+		});
+
+		it('runs preview_list and preview_destroy with no bound site', async () => {
+			const sessionId = await initSession('/sites/mcp');
+			const list = await rpc('/sites/mcp', sessionId, 'tools/call', { name: 'preview_list', arguments: {} });
+			expect(list.result.content[0].text).toContain('preview-site');
+
+			const destroyed = await rpc('/sites/mcp', sessionId, 'tools/call', {
+				name: 'preview_destroy',
+				arguments: { siteId: 'preview-site' },
+			});
+			expect(JSON.parse(destroyed.result.content[0].text).deleted).toBe(true);
 		});
 
 		it('still serves the full surface on a per-site endpoint', async () => {
