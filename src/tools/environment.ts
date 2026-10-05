@@ -64,6 +64,18 @@ export interface ServiceVersions {
 	note: string;
 }
 
+export interface PreviewInfo {
+	id: string;
+	name: string;
+	domain: string;
+	siteUrl: string;
+	sitePath: string;
+	wpPath: string;
+	status: string;
+	parentSiteId: string;
+	mcpUrl: string;
+}
+
 export interface LocalApi {
 	startSite(siteId: string): Promise<{ id: string; name?: string; status: string; message?: string }>;
 	stopSite(siteId: string): Promise<{ id: string; name?: string; status: string; message?: string }>;
@@ -79,6 +91,9 @@ export interface LocalApi {
 	listSites(): Promise<Array<{ id: string; name: string; domain: string; path: string; status: string }>>;
 	createSite(options: CreateSiteOptions): Promise<CreateSiteResult>;
 	listServiceVersions(): Promise<ServiceVersions>;
+	createPreview(parentSiteId: string, label?: string): Promise<PreviewInfo>;
+	listPreviews(): Promise<PreviewInfo[]>;
+	destroyPreview(siteId: string): Promise<{ id: string; name: string; deleted: true }>;
 }
 
 // ── Tool Definitions ───────────────────────────────────────────────────
