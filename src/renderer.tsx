@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { TextButton, TableListRow, FlySelect, Divider } from '@getflywheel/local-components';
 import { AddonRendererContext } from '@getflywheel/local/renderer';
+import { registerAgentShellUi } from './agent-shell/renderer';
+import { ShellSetting } from './agent-shell/ui/ShellSetting';
 
 type AgentTarget = 'claude' | 'cursor' | 'windsurf' | 'vscode';
 
@@ -62,6 +64,8 @@ const helperTextStyle: React.CSSProperties = {
 	color: '#888',
 	margin: '2px 0 0 0',
 };
+
+const inlineLabelStyle: React.CSSProperties = { fontSize: 12, color: '#999', whiteSpace: 'nowrap' };
 
 function AgentToolsPanel({ site, electron }: { site: SiteProps; electron: any }) {
 	const [status, setStatus] = useState<AgentToolsStatus | null>(null);
@@ -186,6 +190,16 @@ function AgentToolsPanel({ site, electron }: { site: SiteProps; electron: any })
 				<p style={helperTextStyle}>
 					Installs an MCP server and project context for AI-powered WordPress development.
 				</p>
+
+				<Divider marginSize="s" />
+				<p style={sectionHeadingStyle}>Agent Shell</p>
+				<ShellSetting
+					key={site.id}
+					site={site}
+					electron={electron}
+					labelStyle={inlineLabelStyle}
+					helperStyle={helperTextStyle}
+				/>
 			</>
 		);
 	}
@@ -281,6 +295,16 @@ function AgentToolsPanel({ site, electron }: { site: SiteProps; electron: any })
 				Disable
 			</TextButton>
 			<p style={helperTextStyle}>Removes Agent Tools config files from this site.</p>
+
+			<Divider marginSize="s" />
+			<p style={sectionHeadingStyle}>Agent Shell</p>
+			<ShellSetting
+				key={site.id}
+				site={site}
+				electron={electron}
+				labelStyle={inlineLabelStyle}
+				helperStyle={helperTextStyle}
+			/>
 		</>
 	);
 }
@@ -295,4 +319,6 @@ export default function (context: AddonRendererContext): void {
 			</TableListRow>
 		);
 	});
+
+	registerAgentShellUi(context);
 }

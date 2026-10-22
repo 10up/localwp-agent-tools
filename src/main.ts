@@ -41,6 +41,7 @@ import {
 	AgentName,
 } from './tools';
 import { execWpCli } from './tools/wpcli';
+import { registerAgentShell } from './agent-shell/main';
 import {
 	BUILT_IN_SITE_DEFAULTS,
 	NewSiteDefaults,
@@ -1664,4 +1665,6 @@ export default function (context: LocalMain.AddonMainContext): void {
 			console.log(`[Agent Tools] Closed sessions for stopped site: ${site.name}`);
 		}
 	});
+
+	registerAgentShell(context);
 }
