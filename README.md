@@ -109,6 +109,24 @@ You can also add it by hand, as a top-level `mcpServers` entry in `~/.claude.jso
 
 The global endpoint puts site management and `create_site` behind one well-known URL. Before, they were reachable only from an enabled site's endpoint. The token still gates every request, so the trust model in [What the token does not protect against](#what-the-token-does-not-protect-against) applies unchanged.
 
+## Agent Shell
+
+The **Agent Shell** button in each site's header opens the site with Local's site environment loaded, so `wp`, `php`, `mysql` and `composer` use the site's PHP and MySQL. It opens either a plain shell or a Claude Code instance.
+
+Configure it in **Preferences › Agent Tools › Agent Shell**:
+
+| Setting          | Effect                                                                                                                                                                                                                                                    |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Open in          | **Herdr** adds a tab to the [herdr](https://herdr.dev) workspace labelled with the site name, or creates it. **Ghostty** opens a new window. **Custom command** runs a command template (see below).                                                      |
+| Default agent    | **None (plain shell)** or a Claude instance. Sites can choose another one in their Tools › Agent Tools panel, under **Agent Shell › Shell**.                                                                                                              |
+| Claude instances | Each has a name, binary path, `CLAUDE_CONFIG_DIR`, launch arguments and environment variables, so different sites can use different Claude accounts. A **Claude** instance with Claude Code's default configuration (`~/.claude`) is set up on first use. |
+
+An instance's settings apply to the Claude process only. When Claude exits, the tab stays open as a plain site shell.
+
+A custom command can use `{script}` (the script that loads the site environment and starts the shell or agent), `{cwd}` (the site's web root) and `{site}` (the site name). Each value is quoted for the shell, for example `open -a Ghostty {script}`. The command runs with your login shell's `PATH`.
+
+Values are stored in plain text in Local's settings. Don't put API keys or other secrets in them.
+
 ## Supported Agents
 
 | Agent           | MCP Config           | Context File                      |
@@ -242,6 +260,12 @@ agent-tools/
 │   │   ├── paths.ts            # Platform-specific binary resolution (PHP, MySQL, WP-CLI)
 │   │   ├── new-site.ts         # Pure helpers for create_site: nicename, domain, and path validation
 │   │   └── port.ts             # Stable port allocation with file persistence
+│   ├── agent-shell/            # Agent Shell button, its preferences and launch logic
+│   │   ├── settings.ts         # Settings model: destination, default agent, Claude instances
+│   │   ├── launchScript.ts     # Builds the launch script from Local's site shell script
+│   │   ├── launch.ts           # Resolves the agent, writes the script, opens the destination
+│   │   ├── destinations/       # herdr, Ghostty and custom command
+│   │   └── ui/                 # Header button, Preferences pane, site Shell select
 │   └── tools/                  # MCP tool implementations
 │       ├── index.ts            # Aggregates definitions (full vs global), routes handleToolCall()
 │       ├── wpcli.ts            # wp_cli
